@@ -8,6 +8,10 @@ import { initI18n, isEn } from './i18n.js';
 import { mountTopbar, mountAuthTools, applyTheme } from './topbar.js';
 import * as AX from './analytics.js';
 import { initPalette, searchBtn, widthBtn } from './palette.js';
+import * as SEC from './security.js';
+import { reportView } from './report.js';
+import * as AUTO from './automation.js';
+import * as GR from './growth.js';
 
 applyTheme();
 initI18n();
@@ -47,17 +51,23 @@ const ICONS = {
   errors: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4.5"/><circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none"/></svg>`,
   broadcast: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 001 1h3l6 4V5L7 9H4a1 1 0 00-1 1z"/><path d="M16.5 8.5a5 5 0 010 7"/><path d="M19 6a8.5 8.5 0 010 12"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/><circle cx="12" cy="12" r="6.5"/></svg>`,
+  growth: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4z"/><path d="M7 6H4v2a3 3 0 003 3M17 6h3v2a3 3 0 01-3 3"/></svg>`,
   fraud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
+  report: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/><path d="M9 17v-3M12 17v-6M15 17v-4"/></svg>`,
 };
 const NAV = [
   ['dash', 'لوحة المؤشرات', 'view'], ['master', 'ماستر كي', 'owneronly'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
-  ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['broadcast', 'رسالة جماعية', 'broadcast'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
-  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['settings', 'الإعدادات', 'settings'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
+  ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['broadcast', 'رسالة جماعية', 'broadcast'], ['companies', 'الشركات والبونص', 'view'], ['growth', 'الحملات والمسابقات', 'view'], ['jobs', 'الوظائف', 'view'],
+  ['report', 'التقرير الأسبوعي', 'view'], ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['settings', 'الإعدادات', 'settings'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
 ];
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 const S = {
-  me: null, perms: null, view: (() => { try { const v = sessionStorage.getItem('fsa-view'); sessionStorage.removeItem('fsa-view'); return v && v !== 'profile' ? v : 'dash'; } catch (_) { return 'dash'; } })(), companies: [], fl: [], flMap: new Map(), poll: null, courSt: '',
+  me: null, perms: null, view: (() => { try {
+    // ?go=<view> (e.g. from a push notification) opens that page once, then the URL is cleaned.
+    const g = new URLSearchParams(location.search).get('go');
+    if (g && /^[a-z]+$/.test(g)) { history.replaceState(null, '', location.pathname); return g; }
+    const v = sessionStorage.getItem('fsa-view'); sessionStorage.removeItem('fsa-view'); return v && v !== 'profile' ? v : 'dash'; } catch (_) { return 'dash'; } })(), companies: [], fl: [], flMap: new Map(), poll: null, courSt: '',
   settings: {}, profileId: null, profTab: 'cands', courMode: lsGet('fsa-cour-mode') === 'board' ? 'board' : 'table', kbOpen: false,
 };
 // Server-side permissions (my_perms) win; the role table is only a fallback if the RPC is unavailable.
@@ -76,6 +86,7 @@ const fnCall = async (body) => {
 };
 const flName = (id) => S.flMap.get(id)?.name ?? '—';
 const compName = (id, fallback) => S.companies.find((c) => c.id === id)?.name ?? fallback ?? '—';
+GR.init({ S, view, can, go: (...a) => go(...a), openProfile: (id) => openProfile(id), flName, compName });
 
 // ------------------------------------------------------------------ auth
 $('#loginForm').onsubmit = async (e) => {
@@ -83,9 +94,11 @@ $('#loginForm').onsubmit = async (e) => {
   await busy($('button', f), async () => {
     const { error } = await sb.auth.signInWithPassword({ email: f.email.value.trim().toLowerCase(), password: f.pw.value });
     if (error) return ($('[data-err]', f).textContent = errMsg(error));
+    SEC.flagPasswordLogin();
     boot();
   });
 };
+SEC.mountPasskeyLogin(() => boot());
 $$('[data-logout]').forEach((b) => b.onclick = async () => { await sb.auth.signOut(); location.reload(); });
 $('#myPw').onclick = async () => {
   const p = await promptBox('تغيير كلمة المرور', 'كلمة المرور الجديدة (8 على الأقل)', { type: 'password' });
@@ -111,9 +124,13 @@ async function boot() {
   { const acts = $('#topbar .tb-acts'); if (acts) { acts.prepend(searchBtn()); acts.append(widthBtn()); } }
   initPalette({ S, go, can, openProfile, openCourier, jobEdit, nav: () => NAV.filter((n) => n[2] === 'owneronly' ? S.me?.role === 'owner' : can(n[2])).map((n) => [n[0], n[1]]) });
   renderPushCtl();
+  SEC.logLogin(data.session);
+  SEC.mountSecurityButton(st);
   await loadBase();
   go(S.view);
+  SEC.maybeOfferPasskey(st, data.session.user.id);
 }
+function report() { return reportView({ S, view, flName, compName }); }
 async function loadBase() {
   const [c, f] = await Promise.all([
     sb.from('companies').select('*').order('name'),
@@ -126,6 +143,16 @@ async function loadBase() {
   const bp = $('[data-badge=partners]'); if (bp) { bp.textContent = pend || ''; bp.classList.toggle('hidden', !pend); }
   await chatBadge();
   await errorsBadge();
+  await staleBadge();
+}
+// Submissions waiting for review longer than the automation threshold (Settings → القواعد التلقائية).
+async function staleBadge() {
+  if (!S.settings?.automation) await loadSettings().catch(() => {});
+  const b = $('[data-badge=couriers]'); if (!b) return;
+  const { data } = await sb.rpc('admin_stale_count');
+  const n = Number(data) || 0;
+  b.textContent = n || ''; b.classList.toggle('hidden', !n); b.classList.add('warn');
+  b.title = n ? `${n} ترشيح تحت المراجعة أكتر من ${AUTO.staleDays(S)} يوم` : '';
 }
 async function errorsBadge() {
   const be = $('[data-badge=errors]'); if (!be || !can('audit')) return;
@@ -182,7 +209,7 @@ async function chatBadge() {
   bc.textContent = count || ''; bc.classList.toggle('hidden', !count);
 }
 function go(v, arg) {
-  const views = { dash, master, partners, profile, couriers, courier, jobform, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
+  const views = { dash, master, partners, profile, couriers, courier, jobform, withdrawals, chat, broadcast, companies, growth: GR.growth, jobs, report, fraud, staff, settings, errors, audit };
   if (!views[v]) v = 'dash';
   S.view = v;
   if (S.poll) { clearInterval(S.poll); S.poll = null; }
@@ -257,14 +284,15 @@ async function dash() {
 }
 
 function staleHtml(cands) {
-  const cutoff = Date.now() - 48 * 3600 * 1000;
+  const sd = AUTO.staleDays(S);
+  const cutoff = Date.now() - sd * 86400 * 1000;
   const stale = cands.filter((c) => c.status === 'submitted' && new Date(c.created_at).getTime() < cutoff)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  if (!stale.length) return `<div class="card stale ok" style="margin-top:12px">✅ مفيش ترشيحات مستنية مراجعة أكتر من 48 ساعة.</div>`;
+  if (!stale.length) return `<div class="card stale ok" style="margin-top:12px">✅ مفيش ترشيحات مستنية مراجعة أكتر من ${sd} يوم.</div>`;
   const age = (c) => { const h = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 3600000); return h >= 48 ? `${Math.floor(h / 24)} يوم` : `${h} ساعة`; };
   return `<div class="card stale" style="margin-top:12px">
     <div class="ph" style="margin-bottom:8px"><h3 style="margin:0">⏰ ترشيحات متأخرة <span class="chip a">${stale.length}</span></h3><button class="btn sec sm" data-stale-all>عرض الكل في المناديب</button></div>
-    <p class="small muted" style="margin:0 0 8px">ترشيحات حالتها "تحت المراجعة" وعدّى عليها أكتر من 48 ساعة — الشريك مستني رد.</p>
+    <p class="small muted" style="margin:0 0 8px">ترشيحات حالتها "تحت المراجعة" وعدّى عليها أكتر من ${sd} يوم — الشريك مستني رد.</p>
     <div class="tw"><table class="t"><thead><tr><th>المندوب</th><th>الشريك</th><th>الشركة</th><th>مستني من</th><th></th></tr></thead><tbody>
       ${stale.slice(0, 10).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small mono muted">${esc(c.code || '')}</div></td><td>${esc(flName(c.freelancer_id))}</td><td>${esc(compName(c.company_id, c.company_name))}</td><td><span class="chip r">${age(c)}</span></td><td>${can('couriers') ? `<button class="btn pri sm" data-stale="${c.id}">مراجعة</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>${stale.length > 10 ? `<div class="small muted" style="margin-top:6px">و${stale.length - 10} كمان…</div>` : ''}</div>`;
@@ -277,6 +305,7 @@ async function partners() {
     fetchAll(() => sb.from('freelancer_balances').select('*')),
     fetchAll(() => sb.from('candidates').select('freelancer_id,status')),
     loginInfo(''),
+    GR.loadQuality(true),
   ]);
   const bMap = new Map(bal.map((b) => [b.freelancer_id, b]));
   const cc = {};
@@ -288,6 +317,7 @@ async function partners() {
       <input class="in q" placeholder="بحث بالاسم، الموبايل، الإيميل، المنطقة" data-q>
       <select class="in" data-st><option value="">كل الحالات</option>${Object.entries(FL_STATUS).map(([k, [t]]) => `<option value="${k}">${t}</option>`).join('')}<option value="DUP">صفوف مكررة (قديمة)</option></select>
       <select class="in" data-gov><option value="">كل المحافظات</option>${[...new Set(S.fl.map((f) => f.gov).filter(Boolean))].map((g) => `<option>${esc(g)}</option>`).join('')}</select>
+      <select class="in" data-qsort title="ترتيب"><option value="">الأحدث الأول</option><option value="qd">⭐ الجودة: الأعلى الأول</option><option value="qa">⭐ الجودة: الأقل الأول</option></select>
     </div>
     <div class="bulk hidden" data-bulk>تم تحديد <span data-n></span>
       <select class="in" style="width:auto" data-bst>${Object.entries(FL_STATUS).filter(([k]) => k !== 'Inactive').map(([k, [t]]) => `<option value="${k}">${t}</option>`).join('')}</select>
@@ -301,6 +331,8 @@ async function partners() {
     const q = $('[data-q]').value.trim().toLowerCase(), st = $('[data-st]').value, g = $('[data-gov]').value;
     rows = S.fl.filter((f) => (st === 'DUP' ? f.duplicate_of : (!f.duplicate_of && (!st || f.status === st))) && (!g || f.gov === g) &&
       (!q || [f.name, f.mobile, '0' + f.mobile, f.email, f.region].join(' ').toLowerCase().includes(q)) && FX.match(f));
+    const qs = $('[data-qsort]').value, qv = (f) => S.quality?.get(f.id)?.score ?? -1;
+    if (qs) rows = [...rows].sort((a, b) => (qs === 'qd' ? qv(b) - qv(a) : (qv(a) < 0 ? 999 : qv(a)) - (qv(b) < 0 ? 999 : qv(b))));
     FX.draw(rows);
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (f) => f.duplicate_of ? '' : `<input type="checkbox" data-sel="${f.id}" ${sel.has(f.id) ? 'checked' : ''}>`],
@@ -310,6 +342,7 @@ async function partners() {
       ['الإيميل', (f) => `<span class="small mono">${esc(f.email || '—')}</span>`],
       ['المنطقة', (f) => `${esc(f.gov || '')}<div class="small muted">${esc(f.region || '')}</div>`],
       ['المناديب', (f) => `<span class="chip p">${cc[f.id]?.h ?? 0} / ${cc[f.id]?.t ?? 0}</span>`],
+      ['الجودة <button class="q-help" data-qhelp title="إزاي بتتحسب؟">?</button>', (f) => f.duplicate_of ? '' : GR.qualityBadge(S.quality?.get(f.id))],
       ['الرصيد', (f) => `<b>${money(bMap.get(f.id)?.balance)}</b><div class="small muted">كسب ${money(bMap.get(f.id)?.total_earned)}</div>`],
       ['الحالة', (f) => chip(FL_STATUS, f.status) + (f.status === 'Inactive' && f.status_reason ? `<div class="small muted" title="${esc(f.status_reason)}">${esc(f.status_reason.slice(0, 24))}</div>` : '')],
       ['آخر دخول', (f) => { const li = S.logins?.get(f.id); return li?.last_sign_in_at ? `<span class="small" title="${new Date(li.last_sign_in_at).toLocaleString('en-GB')}">${fmtDate(li.last_sign_in_at)}</span>${li.sessions ? ` <span class="chip g" title="أجهزة فاتحة">📱${li.sessions}</span>` : ''}` : '<span class="small muted">—</span>'; }],
@@ -369,7 +402,8 @@ async function partners() {
       toast(`اتبعتت لـ ${ok} من ${sel.size} 💬`, ok === sel.size ? 'ok' : 'bad'); sel.clear(); render(); bulkBar();
     });
   };
-  $$('[data-q],[data-st],[data-gov]').forEach((el) => el.oninput = render);
+  $$('[data-q],[data-st],[data-gov],[data-qsort]').forEach((el) => el.oninput = render);
+  $('#tbl').addEventListener('click', (e) => { if (e.target.closest('[data-qhelp]')) { e.stopPropagation(); GR.qualityHelp(); } });
   const FX = AX.partnersFx({ S, onChange: () => render() });
   $('[data-csv]').onclick = () => csvDownload('FullSpeed_Partners.csv',
     ['التاريخ', 'الاسم', 'الموبايل', 'الإيميل', 'المحافظة', 'المنطقة', 'الحالة', 'المناديب', 'شغالين', 'إجمالي الأرباح', 'اتصرف', 'قيد المراجعة', 'الرصيد'],
@@ -423,7 +457,7 @@ async function master() {
 
 // ------------------------------------------------------------------ partner profile (full page)
 function openProfile(id) { S.profileId = id; go('profile'); }
-const ledKind = (x) => x.kind === 'paper' ? 'بونص ورق' : x.kind === 'days' ? `بونص ${x.tier_days} يوم` : 'تسوية';
+const ledKind = (x) => x.kind === 'paper' ? 'بونص ورق' : x.kind === 'days' ? `بونص ${x.tier_days} يوم` : x.kind === 'campaign' ? '🎯 بونص حملة' : x.kind === 'contest' ? '🏆 جايزة مسابقة' : 'تسوية';
 
 async function profile() {
   const id = S.profileId, f = S.flMap.get(id);
@@ -434,8 +468,10 @@ async function profile() {
     sb.from('bonus_ledger').select('*').eq('freelancer_id', id).order('created_at', { ascending: false }),
     sb.from('withdrawals').select('*').eq('freelancer_id', id).order('created_at', { ascending: false }),
     can('partners') ? sb.from('messages').select('id,from_staff,body,created_at,read_at').eq('freelancer_id', id).order('created_at', { ascending: false }).limit(30) : Promise.resolve({ data: [] }),
+    GR.loadQuality(),
   ]);
   if (c.error) throw c.error;
+  const qual = S.quality?.get(id);
   const cands = c.data || [], led = l.data || [], wds = w.data || [];
   const sm = (!sumR.error && sumR.data) || {};
   const fz = sm.freelancer || { frozen: !!f.frozen_at, frozen_reason: f.frozen_reason, ref_code: f.ref_code };
@@ -461,6 +497,7 @@ async function profile() {
           ${f.email ? `<span class="mono">${esc(f.email)}</span>` : ''}
         </div>
         ${fz.frozen ? `<div class="prof-fz">🔒 السحب والترشيح موقوفين — السبب: ${esc(fz.frozen_reason || '—')}</div>` : ''}
+        <details class="prof-q"><summary>⭐ تقييم الجودة ${GR.qualityBadge(qual)} <button type="button" class="q-help" data-qhelp title="إزاي بتتحسب؟">?</button></summary>${GR.qualityDetail(qual)}</details>
       </div>
       <div class="prof-acts">
         <button class="btn sec sm" data-as title="بيفتح تطبيق الشريك للقراءة بس">👁️ شوف التطبيق بعينه</button>
@@ -547,6 +584,7 @@ async function profile() {
   $('[data-back]').onclick = () => go('partners');
   $('[data-as]').onclick = () => window.open('/?as=' + encodeURIComponent(id), '_blank', 'noopener');
   $('[data-stmt]').onclick = () => statementModal(f, led, wds, candName);
+  $('.prof-q [data-qhelp]')?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); GR.qualityHelp(); });
   const on = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
   on('[data-msg]', () => go('chat', id));
   on('[data-ctl]', () => partnerControl(f));
@@ -1138,19 +1176,34 @@ async function withdrawals() {
       ['التحويل على', (w) => { const fm = S.flMap.get(w.freelancer_id)?.mobile; const d = normMobile(w.details); const warn = d && fm && d !== fm; return `${esc(w.method)}<div class="mono small">${esc(w.details)}</div>${warn ? '<span class="chip r">⚠️ رقم مختلف عن موبايل الشريك</span>' : ''}`; }],
       ['رصيد الشريك', (w) => money(bMap.get(w.freelancer_id)?.balance)],
       ['الحالة', (w) => chip(WD_STATUS, w.status) + (w.admin_note ? `<div class="small muted">${esc(w.admin_note)}</div>` : '') + (w.decided_at ? `<div class="small muted">${fmtDate(w.decided_at)}</div>` : '')],
+      ['الإيصال', (w) => w.status !== 'paid' ? '<span class="small muted">—</span>'
+        : w.receipt_path ? `<button class="btn sec sm" data-rc="${w.id}">🧾 الإيصال</button>`
+        : can('withdrawals') ? `<button class="btn ghost sm rc-miss" data-rc="${w.id}" title="ارفع إيصال التحويل">📎 ارفع إيصال</button>` : '<span class="small muted">—</span>'],
       ['', (w) => can('withdrawals') && (w.status === 'pending' || S.me.role === 'owner') ? `<div class="acts">${w.status !== 'paid' ? `<button class="btn pri sm" data-paid="${w.id}">✅ تم التحويل</button>` : ''}${w.status !== 'rejected' ? `<button class="btn dan sm" data-rej="${w.id}">رفض</button>` : ''}${w.status !== 'pending' ? `<button class="btn sec sm" data-pend="${w.id}">إرجاع للمراجعة</button>` : ''}</div>` : ''],
     ], { onRender: (h) => {
       const act = (sel, st, ask) => $$(sel, h).forEach((b) => b.onclick = async () => {
         const id = b.dataset[Object.keys(b.dataset)[0]];
         const w = wds.find((x) => x.id === id);
         let note = null;
-        if (ask) { note = await promptBox(ask, 'ملاحظة (هتظهر للشريك)', { required: st === 'rejected' }); if (note === null) return; }
-        else if (!(await confirmBox('تأكيد التحويل', `تم تحويل ${money(w.amount)} لـ ${flName(w.freelancer_id)} على ${w.details}؟`, 'تم التحويل', false))) return;
+        if (!ask) {
+          // "Paid" goes through a dialog that can also take the transfer receipt.
+          const ok = await AUTO.paidDialog(w, flName(w.freelancer_id), async () => {
+            const { error } = await sb.rpc('admin_set_withdrawal_status', { p_id: id, p_status: st, p_note: null });
+            if (error) throw error;
+          });
+          if (ok) { await loadBase(); go('withdrawals'); }
+          return;
+        }
+        note = await promptBox(ask, 'ملاحظة (هتظهر للشريك)', { required: st === 'rejected' }); if (note === null) return;
         const { error } = await sb.rpc('admin_set_withdrawal_status', { p_id: id, p_status: st, p_note: note || null });
         if (error) return toast(errMsg(error), 'bad');
         toast('تم ✅', 'ok'); await loadBase(); go('withdrawals');
       });
       act('[data-paid]', 'paid'); act('[data-rej]', 'rejected', 'سبب الرفض'); act('[data-pend]', 'pending', 'سبب الإرجاع');
+      $$('[data-rc]', h).forEach((b) => b.onclick = async () => {
+        const w = wds.find((x) => x.id === b.dataset.rc);
+        if (await AUTO.receiptDialog(w, flName(w.freelancer_id), can('withdrawals'))) render();
+      });
     } });
   };
   $$('[data-st],[data-q]').forEach((el) => el.oninput = render);
@@ -1629,7 +1682,8 @@ async function staff() {
       <b>الصلاحيات:</b> المالك = كل حاجة • مدير = كل حاجة ما عدا الفريق والرجوع عن التعديلات • مالية = عرض + السحوبات • توظيف = عرض + المناديب والوظائف • مشاهدة فقط.
       <div class="muted" style="margin-top:4px">زرار <b>تفصيل</b> بيخليك تختار صلاحيات معينة لكل عضو بدل الافتراضي بتاع دوره.</div>
     </div>
-    <div id="tbl"></div>`);
+    <div id="tbl"></div><div id="stLogins"></div>`);
+  if (S.me?.role === 'owner') SEC.staffLogins($('#stLogins'));
   pagedTable($('#tbl'), data, [
     ['الإيميل', (s) => `<span class="mono">${esc(s.email)}</span>`], ['الاسم', (s) => esc(s.name || '')],
     ['الصلاحية', (s) => `<select class="in" style="width:auto" data-role="${s.user_id}">${Object.entries(ROLE_AR).map(([k, t]) => `<option value="${k}" ${k === s.role ? 'selected' : ''}>${t}</option>`).join('')}</select>`],
@@ -1870,6 +1924,7 @@ async function settings() {
         <div data-lv></div>
         <div class="row" style="justify-content:space-between"><button type="button" class="btn sec sm" data-lvadd>➕ مستوى جديد</button><button class="btn pri">حفظ المستويات</button></div>
       </form>
+      ${AUTO.automationCard(S, upd)}
     </div>`);
 
   const save = (form, key, value) => busy($('button.pri', form), async () => {
@@ -1900,6 +1955,9 @@ async function settings() {
   // features
   const ff = $('[data-s=features]');
   ff.onsubmit = (e) => { e.preventDefault(); save(ff, 'features', Object.fromEntries(Object.keys(FEAT_AR).map((k) => [k, ff[k].checked]))); };
+
+  // automation rules (admin/automation.js)
+  AUTO.bindAutomation($('[data-s=automation]'), save, can('settings'));
 
   // new-job broadcast
   const fj = $('[data-s=job_broadcast]');

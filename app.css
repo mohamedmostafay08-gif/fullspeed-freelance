@@ -806,3 +806,38 @@ html[dir="ltr"] .jn-jc,html[dir="ltr"] .jn-hero{text-align:left}
 body.ro .fab,body.ro [data-apply],body.ro [data-add],body.ro .w-cta,body.ro .composer,body.ro .up-btn,body.ro #pf button,body.ro #pw button,
 body.ro #secCard,body.ro [data-logout],body.ro [data-empty-cta],body.ro .ibtn.add,body.ro .calc,body.ro [data-tour]{display:none!important}
 body.ro .dock{grid-template-columns:repeat(4,1fr)}
+
+/* withdrawal transfer receipt */
+.rc-btn{align-self:flex-start;margin-top:8px;border:1px solid var(--line);background:var(--card);color:var(--g2);font:inherit;font-size:13px;font-weight:700;padding:6px 12px;border-radius:999px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.rc-btn:active{transform:scale(.97)}
+.rc-view{margin-top:10px;text-align:center}
+.rc-view img{display:block;max-width:100%;max-height:62dvh;margin:0 auto;border-radius:14px;border:1px solid var(--line);object-fit:contain}
+
+/* ===== Campaigns + contests (home cards, sheets) ===== */
+.gcamp,.gcont{display:flex;align-items:center;gap:12px;width:100%;text-align:start;border:0;cursor:pointer;margin-top:12px;padding:14px;border-radius:20px;color:var(--ink);font:inherit;box-shadow:var(--sh);-webkit-tap-highlight-color:transparent;transition:transform .3s var(--spring)}
+.gcamp:active,.gcont:active{transform:scale(.98)}
+.gcamp{background:linear-gradient(135deg,color-mix(in srgb,var(--orange) 16%,var(--card)),var(--card) 70%);border:1.5px solid color-mix(in srgb,var(--orange) 35%,transparent)}
+.gcont{background:linear-gradient(135deg,color-mix(in srgb,#f5b301 18%,var(--card)),var(--card) 70%);border:1.5px solid color-mix(in srgb,#f5b301 40%,transparent)}
+.gc-ic,.gk-ic{flex:none;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;background:var(--card);box-shadow:var(--sh)}
+.gcamp .grow,.gcont .grow{display:flex;flex-direction:column;gap:3px;min-width:0}
+.gc-t,.gk-t{font-weight:800;font-size:15px}
+.gc-t em{font-style:normal;font-size:11px;background:var(--orange);color:#fff;border-radius:99px;padding:1px 7px;margin-inline-start:4px}
+.gc-s,.gk-s{font-size:12.5px;color:var(--ink2);line-height:1.5}
+.gc-s b,.gk-s b{color:var(--orange)}
+.gc-left{flex:none;display:flex;flex-direction:column;align-items:center;font-weight:900;font-size:20px;color:var(--orange);line-height:1}
+.gc-left small,.gk-end small{font-size:10.5px;font-weight:600;color:var(--mute)}
+.gk-end{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.gk-end b{color:#c27c00;font-size:15px}
+.glist{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.gitem{display:flex;flex-direction:column;gap:4px;padding:12px;border-radius:14px;background:var(--field);border:1px solid var(--line);font-size:13px}
+.gitem b{font-size:14.5px}
+.lb-prizes{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
+.lb-prizes span{background:var(--field);border:1px solid var(--line);border-radius:99px;padding:5px 12px;font-weight:700;font-size:13px}
+.lb-win{background:color-mix(in srgb,var(--g) 14%,var(--card));color:var(--g2,var(--g));border-radius:14px;padding:10px 12px;font-weight:700;margin-bottom:10px}
+.lb{display:flex;flex-direction:column;gap:4px}
+.lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;background:var(--field);font-size:14px}
+.lb-row.me{background:color-mix(in srgb,var(--orange) 14%,var(--card));border:1.5px solid color-mix(in srgb,var(--orange) 40%,transparent);margin-top:6px}
+.lb-row em{font-style:normal;color:var(--orange);font-size:12px}
+.lb-rk{width:28px;text-align:center;font-weight:800}
+.lb-row b{font-size:15px}
+.rc-view a.btn{text-decoration:none}

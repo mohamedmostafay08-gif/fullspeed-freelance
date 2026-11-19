@@ -4,6 +4,7 @@ import {
   GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip,
 } from './shared/common.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './shared/config.js';
+import { loadGrowth, growthCards, bindGrowth, growthKind } from './shared/partner-growth.js';
 
 const S = { summary: null, companies: [], rules: [], jobs: null, cands: null, ledger: null, view: 'home', cStatus: '', walletTab: 'earn' };
 const T0 = performance.now();
@@ -490,7 +491,7 @@ function go(v) {
 }
 
 // ------------------------------------------------------------------ notifications
-const NOTIF_IC = { new_job: '🚀', broadcast: '📣', frozen: '🔒', unfrozen: '✅', hired: '🎉', rejected: '❌', accepted: '✅', paper: '📄', bonus: '💰', paid: '💸', wd_rejected: '⚠️', message: '💬', self_join: '🙌' };
+const NOTIF_IC = { stalled: '⏳', new_job: '🚀', broadcast: '📣', frozen: '🔒', unfrozen: '✅', hired: '🎉', rejected: '❌', accepted: '✅', paper: '📄', bonus: '💰', paid: '💸', wd_rejected: '⚠️', message: '💬', self_join: '🙌' };
 const ago = (d) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(d)) / 60000));
   return m < 1 ? 'دلوقتي' : m < 60 ? `من ${m} دقيقة` : m < 1440 ? `من ${Math.round(m / 60)} ساعة` : m < 2880 ? 'امبارح' : fmtDate(d);
@@ -707,7 +708,7 @@ function bindPills(root, st, render) {
 // ------------------------------------------------------------------ home
 async function home() {
   if (!S.summary) loading();
-  await Promise.all([refreshSummary(), loadJobs(), loadCands().catch(() => {})]);
+  const [, , , G] = await Promise.all([refreshSummary(), loadJobs(), loadCands().catch(() => {}), loadGrowth()]);
   updateJobsBadge();
   const s = S.summary, b = s.balance || {}, n = s.counts || {};
   const fc = forecast();
@@ -742,6 +743,7 @@ async function home() {
           : 'وصلت لأعلى مستوى 👑 كمّل كده!'}</span>
       </span>
     </button>
+    ${growthCards(G)}
     ${installCard()}
     ${feat('push_prompt') && !RO ? pushCard() : ''}
     ${S.summary.freelancer.ref_code && feat('join') ? `<button class="refcard rise" style="--i:2" data-ref>
@@ -807,6 +809,7 @@ async function home() {
   bindJobActions($('#view'));
   bindInstall();
   bindPushCard();
+  bindGrowth($('#view'), G);
   $('[data-ref]')?.addEventListener('click', refSheet);
   $$('.pl').forEach((b) => b.onclick = () => { buzz(8); S.jobCo = b.dataset.co; go('jobs'); });
 }
@@ -1340,11 +1343,25 @@ function candCard(c, earned, i) {
 }
 
 // ------------------------------------------------------------------ wallet
+// Transfer receipt the admin attached to a paid withdrawal (private bucket, short-lived signed link).
+async function receiptSheet(x) {
+  if (!x?.receipt_path) return;
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">🧾</div><div><h2>إيصال التحويل</h2><p>${money(x.amount)} · ${esc(x.method || '')} · ${fmtDate(x.decided_at)}</p></div></div>
+    <div class="rc-view"><div class="spin"></div></div>`);
+  const box = $('.rc-view', m.el);
+  const { data, error } = await sb.storage.from('receipts').createSignedUrl(x.receipt_path, 600);
+  if (error || !data?.signedUrl) { box.innerHTML = `<p class="muted">مقدرناش نفتح الإيصال دلوقتي. جرّب تاني.</p>`; return; }
+  const u = data.signedUrl;
+  box.innerHTML = /\.pdf$/i.test(x.receipt_path)
+    ? `<a class="btn pri block" href="${esc(u)}" target="_blank" rel="noopener">📄 افتح الإيصال (PDF)</a>`
+    : `<img src="${esc(u)}" alt="إيصال التحويل"><a class="btn sec block" href="${esc(u)}" target="_blank" rel="noopener" style="margin-top:10px">فتح بالحجم الكامل</a>`;
+}
+
 async function wallet() {
   loading();
   await refreshSummary();
   const [w, l] = await Promise.all([
-    sb.from('withdrawals').select('id,amount,method,details,status,admin_note,created_at,decided_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
+    sb.from('withdrawals').select('id,amount,method,details,status,admin_note,created_at,decided_at,receipt_path').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
     sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,reverse_reason,note').eq('freelancer_id', S.summary.freelancer.id).order('earned_on', { ascending: false }),
   ]);
   if (!S.cands) await loadCands().catch(() => {});
@@ -1371,13 +1388,14 @@ async function wallet() {
     <div class="list tight" id="wList"></div>`);
   const kindMeta = (x) => (x.kind === 'paper' ? { c: 'var(--sky)', ic: IC.doc, t: 'بونص ورق' }
     : x.kind === 'days' ? { c: 'var(--g)', ic: IC.star, t: `بونص ${x.tier_days} يوم` }
+      : growthKind(x) ? { c: x.kind === 'contest' ? '#d98a00' : 'var(--orange)', ic: IC.gift, t: growthKind(x).t, noNote: true }
       : { c: 'var(--orange)', ic: IC.trend, t: 'تسوية من الإدارة' });
   const earnRow = (x, i) => {
     const k = kindMeta(x), amt = Number(x.amount) || 0;
     return `<div class="tx rise ${x.reversed_at ? 'rev' : ''}" style="--i:${Math.min(i, 10)};--c:${k.c}">
       <div class="tx-ic">${k.ic}</div>
       <div class="grow"><b>${k.t}</b><span>${esc(cName(x.candidate_id) || '—')} · ${fmtDate(x.earned_on)}</span>
-        ${x.reversed_at ? `<span class="tx-note">ملغي: ${esc(x.reverse_reason || '')}</span>` : ''}${x.note ? `<span class="tx-note">${esc(x.note)}</span>` : ''}</div>
+        ${x.reversed_at ? `<span class="tx-note">ملغي: ${esc(x.reverse_reason || '')}</span>` : ''}${x.note && !k.noNote ? `<span class="tx-note">${esc(x.note)}</span>` : ''}</div>
       <div class="tx-end"><div class="tx-amt ${amt < 0 ? 'neg' : ''}">${amt >= 0 ? '+' : ''}${money(amt)}</div></div>
     </div>`;
   };
@@ -1389,7 +1407,8 @@ async function wallet() {
           <li class="${x.status === 'pending' ? 'now' : 'ok'}"><i></i><span>مراجعة<br>الإدارة</span></li>
           <li class="${x.status === 'paid' ? 'ok' : x.status === 'rejected' ? 'bad' : ''}"><i></i><span>${x.status === 'rejected' ? 'اترفض' : 'اتحوّل'}<br>${x.decided_at ? fmtDate(x.decided_at) : '—'}</span></li>
         </ol>
-        ${x.admin_note ? `<span class="tx-note">${esc(x.admin_note)}</span>` : ''}</div>
+        ${x.admin_note ? `<span class="tx-note">${esc(x.admin_note)}</span>` : ''}
+        ${x.status === 'paid' && x.receipt_path ? `<button class="rc-btn" data-rc="${esc(x.id)}">🧾 الإيصال</button>` : ''}</div>
       <div class="tx-end"><div class="tx-amt" style="color:var(--ink)">${money(x.amount)}</div>${chip(WD_STATUS, x.status)}</div>
     </div>`;
   const render = () => {
@@ -1397,6 +1416,7 @@ async function wallet() {
     if (S.walletTab === 'earn') box.innerHTML = led.length ? led.map(earnRow).join('') : empty('🌱', 'لسه مفيش أرباح', 'رشّح مناديب وابدأ اكسب من أول ما يكمّلوا ورقهم.', 'رشّح مندوب');
     else box.innerHTML = wds.length ? wds.map(wdRow).join('') : empty('💸', 'مفيش طلبات سحب', 'أول ما يبقى عندك رصيد اطلب سحبه من الزرار اللي فوق.');
     const cta = $('[data-empty-cta]', box); if (cta) cta.onclick = () => addCourier();
+    $$('[data-rc]', box).forEach((b) => b.onclick = () => receiptSheet(wds.find((x) => x.id === b.dataset.rc)));
     animateIn(box);
   };
   $$('.seg2 button').forEach((btn) => btn.onclick = () => {

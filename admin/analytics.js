@@ -3,6 +3,7 @@
 // filter bar (filters.js) turns into a filter; '@month' columns narrow the date range to that month.
 import { $, $$, esc, money, fetchAll, sb, CAND_STATUS, WD_STATUS, FL_STATUS, today, daysBetween } from '../shared/common.js';
 import { filters, rangeBounds, inBounds } from './filters.js';
+import { qBand, Q_BANDS } from './growth.js';
 
 const n0 = (v) => Math.round(Number(v) || 0).toLocaleString('en-US');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -248,8 +249,9 @@ export function partnersFx({ S, onChange }) {
   const prim = S.fl.filter((f) => !f.duplicate_of);
   const FX = filters('partners', {
     tools: $('.tools'), date: (f) => f.created_at,
-    adopt: [{ key: 'q', label: 'بحث', el: '[data-q]' }, { key: 'st', label: 'الحالة', el: '[data-st]' }, { key: 'gov', label: 'المحافظة', el: '[data-gov]' }],
-    dims: [{ key: 'login', label: 'الدخول', all: 'كل الحسابات', options: [['yes', 'ليه دخول'], ['no', 'بدون دخول'], ['frozen', 'متجمّد']], get: (f) => (f.frozen_at ? 'frozen' : f.user_id ? 'yes' : 'no') }],
+    adopt: [{ key: 'q', label: 'بحث', el: '[data-q]' }, { key: 'st', label: 'الحالة', el: '[data-st]' }, { key: 'gov', label: 'المحافظة', el: '[data-gov]' }, { key: 'qsort', label: 'الترتيب', el: '[data-qsort]' }],
+    dims: [{ key: 'login', label: 'الدخول', all: 'كل الحسابات', options: [['yes', 'ليه دخول'], ['no', 'بدون دخول'], ['frozen', 'متجمّد']], get: (f) => (f.frozen_at ? 'frozen' : f.user_id ? 'yes' : 'no') },
+      { key: 'qual', label: 'الجودة', all: 'كل مستويات الجودة', options: Q_BANDS, get: (f) => qBand(S.quality?.get(f.id)) }],
     onChange,
   });
   FX.draw = (rows) => {

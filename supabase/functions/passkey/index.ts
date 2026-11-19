@@ -103,6 +103,11 @@ Deno.serve(async (req) => {
         });
         if (!v.verified) return reply({ error: 'not_verified' }, 400);
         await sb.from('passkeys').update({ counter: v.authenticationInfo.newCounter, last_used_at: new Date().toISOString() }).eq('id', pk.id);
+        if (body.app === 'admin') {
+          // The admin login screen only issues sessions to active staff.
+          const { data: st } = await sb.from('staff').select('active').eq('user_id', pk.user_id).maybeSingle();
+          if (!st?.active) return reply({ error: 'not_staff' }, 403);
+        }
         const { data: u } = await sb.auth.admin.getUserById(pk.user_id);
         if (!u.user?.email) return reply({ error: 'no_user' }, 400);
         const { data: link, error } = await sb.auth.admin.generateLink({ type: 'magiclink', email: u.user.email });
