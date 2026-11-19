@@ -17,11 +17,15 @@ addEventListener('error', (e) => reportError(e.message, e.error?.stack));
 addEventListener('unhandledrejection', (e) => reportError(e.reason?.message || e.reason, e.reason?.stack));
 
 const ROLE_PERMS = {
-  owner: ['view', 'partners', 'couriers', 'withdrawals', 'companies', 'jobs', 'audit', 'staff'],
-  admin: ['view', 'partners', 'couriers', 'withdrawals', 'companies', 'jobs', 'audit'],
+  owner: ['view', 'partners', 'couriers', 'withdrawals', 'companies', 'jobs', 'audit', 'staff', 'settings', 'broadcast', 'revert'],
+  admin: ['view', 'partners', 'couriers', 'withdrawals', 'companies', 'jobs', 'audit', 'settings', 'broadcast'],
   finance: ['view', 'withdrawals'], recruiter: ['view', 'couriers', 'jobs'], viewer: ['view'],
 };
 const ROLE_AR = { owner: 'المالك', admin: 'مدير', finance: 'مالية', recruiter: 'توظيف', viewer: 'مشاهدة فقط' };
+const PERM_AR = {
+  view: 'عرض كل الصفحات', partners: 'الشركاء والمحادثات والتجميد', couriers: 'تعديل المناديب', withdrawals: 'طلبات السحب',
+  companies: 'الشركات والبونص', jobs: 'الوظائف', audit: 'سجل التغييرات والأخطاء', settings: 'إعدادات التطبيق', broadcast: 'الرسايل الجماعية',
+};
 const ICONS = {
   dash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
   partners: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="7" r="3.5"/><path d="M2 21c0-3.6 2.7-6.5 6-6.5S14 17.4 14 21"/><circle cx="17" cy="8.5" r="3"/><path d="M14 21c0-3 2.1-5.5 5.5-5.5"/></svg>`,
@@ -33,15 +37,23 @@ const ICONS = {
   audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 01-12.6 7.4L3 20l1.2-4.2A8.5 8.5 0 1121 11.5z"/><path d="M8 10h8M8 13.5h5"/></svg>`,
   errors: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4.5"/><circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none"/></svg>`,
+  broadcast: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 001 1h3l6 4V5L7 9H4a1 1 0 00-1 1z"/><path d="M16.5 8.5a5 5 0 010 7"/><path d="M19 6a8.5 8.5 0 010 12"/></svg>`,
+  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/><circle cx="12" cy="12" r="6.5"/></svg>`,
   fraud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
 };
 const NAV = [
   ['dash', 'لوحة المؤشرات', 'view'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
-  ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
-  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
+  ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['broadcast', 'رسالة جماعية', 'broadcast'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
+  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['settings', 'الإعدادات', 'settings'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
 ];
-const S = { me: null, view: 'dash', companies: [], fl: [], flMap: new Map(), poll: null, courSt: '' };
-const can = (p) => (ROLE_PERMS[S.me?.role] ?? []).includes(p);
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
+const S = {
+  me: null, perms: null, view: 'dash', companies: [], fl: [], flMap: new Map(), poll: null, courSt: '',
+  settings: {}, profileId: null, profTab: 'cands', courMode: lsGet('fsa-cour-mode') === 'board' ? 'board' : 'table', kbOpen: false,
+};
+// Server-side permissions (my_perms) win; the role table is only a fallback if the RPC is unavailable.
+const can = (p) => (S.perms ?? ROLE_PERMS[S.me?.role] ?? []).includes(p);
 const show = (id) => ['auth', 'noaccess', 'app'].forEach((x) => $('#' + x).classList.toggle('hidden', x !== id));
 const view = (h) => { $('#view').innerHTML = h; };
 const loading = () => view('<div class="spin"></div>');
@@ -75,10 +87,12 @@ $('#myPw').onclick = async () => {
 async function boot() {
   const { data } = await sb.auth.getSession();
   if (!data.session) return show('auth');
-  const { data: st } = await sb.from('staff').select('role,active,email,name').eq('user_id', data.session.user.id).maybeSingle();
+  const { data: st } = await sb.from('staff').select('role,active,email,name,perms').eq('user_id', data.session.user.id).maybeSingle();
   if (!st || !st.active) { $('#naEmail').textContent = data.session.user.email; return show('noaccess'); }
   S.me = st;
-  $('#meEmail').textContent = st.email; $('#meRole').textContent = ROLE_AR[st.role];
+  const pr = await sb.rpc('my_perms');
+  S.perms = !pr.error && Array.isArray(pr.data) ? pr.data : null;
+  $('#meEmail').textContent = st.email; $('#meRole').textContent = ROLE_AR[st.role] + (st.perms && st.role !== 'owner' ? ' • صلاحيات مخصّصة' : '');
   $('#nav').innerHTML = NAV.filter((n) => can(n[2])).map((n) => `<button data-go="${n[0]}"><span class="ico">${ICONS[n[0]] || ''}</span><span class="lbl">${n[1]}</span><span class="badge hidden" data-badge="${n[0]}"></span></button>`).join('');
   $$('#nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
   show('app');
@@ -89,7 +103,7 @@ async function boot() {
 async function loadBase() {
   const [c, f] = await Promise.all([
     sb.from('companies').select('*').order('name'),
-    fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes').order('created_at', { ascending: false })),
+    fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes,frozen_at,frozen_reason,ref_code').order('created_at', { ascending: false })),
   ]);
   S.companies = c.data ?? []; S.fl = f; S.flMap = new Map(f.map((x) => [x.id, x]));
   const { count } = await sb.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
@@ -153,12 +167,15 @@ async function chatBadge() {
   const { count } = await sb.from('messages').select('*', { count: 'exact', head: true }).eq('from_staff', false).is('read_at', null);
   bc.textContent = count || ''; bc.classList.toggle('hidden', !count);
 }
-function go(v) {
+function go(v, arg) {
+  const views = { dash, partners, profile, couriers, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
+  if (!views[v]) v = 'dash';
   S.view = v;
   if (S.poll) { clearInterval(S.poll); S.poll = null; }
-  $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
+  $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === (v === 'profile' ? 'partners' : v)));
   loading();
-  ({ dash, partners, couriers, withdrawals, chat, companies, jobs, fraud, staff, errors, audit })[v]().catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
+  scrollTo(0, 0);
+  views[v](arg).catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
 }
 
 // generic paged table renderer
@@ -292,18 +309,18 @@ async function partners() {
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (f) => f.duplicate_of ? '' : `<input type="checkbox" data-sel="${f.id}" ${sel.has(f.id) ? 'checked' : ''}>`],
       ['التاريخ', (f) => `<span class="small">${fmtDate(f.created_at)}</span>`],
-      ['الاسم', (f) => `<b>${esc(f.name)}</b>${f.duplicate_of ? '<div class="small" style="color:var(--amber)">مكرر من: ' + esc(flName(f.duplicate_of)) + '</div>' : ''}${f.user_id || f.duplicate_of ? '' : '<div class="small" style="color:var(--red)">بدون دخول</div>'}`],
+      ['الاسم', (f) => `<b>${esc(f.name)}</b>${f.frozen_at ? ' <span class="chip r" title="${esc(f.frozen_reason || '')}">🔒 متجمّد</span>' : ''}${f.duplicate_of ? '<div class="small" style="color:var(--amber)">مكرر من: ' + esc(flName(f.duplicate_of)) + '</div>' : ''}${f.user_id || f.duplicate_of ? '' : '<div class="small" style="color:var(--red)">بدون دخول</div>'}`],
       ['الموبايل', (f) => `<a class="mono" href="${waLink(f.mobile)}" target="_blank" rel="noopener">0${esc(f.mobile)}</a>`],
       ['الإيميل', (f) => `<span class="small mono">${esc(f.email || '—')}</span>`],
       ['المنطقة', (f) => `${esc(f.gov || '')}<div class="small muted">${esc(f.region || '')}</div>`],
       ['المناديب', (f) => `<span class="chip p">${cc[f.id]?.h ?? 0} / ${cc[f.id]?.t ?? 0}</span>`],
       ['الرصيد', (f) => `<b>${money(bMap.get(f.id)?.balance)}</b><div class="small muted">كسب ${money(bMap.get(f.id)?.total_earned)}</div>`],
       ['الحالة', (f) => chip(FL_STATUS, f.status)],
-      ['', (f) => `<div class="acts"><button class="btn sec sm" data-det="${f.id}">التفاصيل</button>${can('partners') ? `<button class="btn sec sm" data-ed="${f.id}">تعديل</button>` : ''}</div>`],
+      ['', (f) => `<div class="acts"><button class="btn sec sm" data-det="${f.id}">الملف</button>${can('partners') ? `<button class="btn sec sm" data-ed="${f.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((c) => c.onchange = () => { c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); bulkBar(); });
       const all = $('[data-all]', h); if (all) all.onchange = () => { rows.filter((f) => !f.duplicate_of).forEach((f) => all.checked ? sel.add(f.id) : sel.delete(f.id)); render(); bulkBar(); };
-      $$('[data-det]', h).forEach((b) => b.onclick = () => partnerDetails(S.flMap.get(b.dataset.det), bMap.get(b.dataset.det)));
+      $$('[data-det]', h).forEach((b) => b.onclick = () => openProfile(b.dataset.det));
       $$('[data-ed]', h).forEach((b) => b.onclick = () => partnerEdit(S.flMap.get(b.dataset.ed)));
     } });
   };
@@ -325,48 +342,201 @@ async function partners() {
   render(); bulkBar();
 }
 
-async function partnerDetails(f, b) {
-  const [c, l, w] = await Promise.all([
-    sb.from('candidates').select('*').eq('freelancer_id', f.id).order('created_at', { ascending: false }),
-    sb.from('bonus_ledger').select('*').eq('freelancer_id', f.id).order('created_at', { ascending: false }),
-    sb.from('withdrawals').select('*').eq('freelancer_id', f.id).order('created_at', { ascending: false }),
+// ------------------------------------------------------------------ partner profile (full page)
+function openProfile(id) { S.profileId = id; go('profile'); }
+const ledKind = (x) => x.kind === 'paper' ? 'بونص ورق' : x.kind === 'days' ? `بونص ${x.tier_days} يوم` : 'تسوية';
+
+async function profile() {
+  const id = S.profileId, f = S.flMap.get(id);
+  if (!f) { S.view = 'partners'; return partners(); }
+  const [sumR, c, l, w, msgs] = await Promise.all([
+    sb.rpc('admin_freelancer_summary', { p_freelancer: id }),
+    sb.from('candidates').select('*').eq('freelancer_id', id).order('created_at', { ascending: false }),
+    sb.from('bonus_ledger').select('*').eq('freelancer_id', id).order('created_at', { ascending: false }),
+    sb.from('withdrawals').select('*').eq('freelancer_id', id).order('created_at', { ascending: false }),
+    can('partners') ? sb.from('messages').select('id,from_staff,body,created_at,read_at').eq('freelancer_id', id).order('created_at', { ascending: false }).limit(30) : Promise.resolve({ data: [] }),
   ]);
-  b = b || {};
-  const kindTxt = (x) => x.kind === 'paper' ? 'ورق' : x.kind === 'days' ? `${x.tier_days} يوم` : 'تسوية';
-  const m = modal(`
-    <div class="ph"><h2 style="margin:0">${esc(f.name)} ${chip(FL_STATUS, f.status)}</h2><button class="btn ghost" data-close>✕</button></div>
-    <div class="kv">
-      <div><span>الموبايل</span><a class="mono" href="${waLink(f.mobile)}" target="_blank">0${esc(f.mobile)}</a></div><div><span>الإيميل</span>${esc(f.email || '—')}</div>
-      <div><span>المنطقة</span>${esc(f.gov || '')} ${esc(f.region || '')}</div><div><span>تاريخ التسجيل</span>${fmtDate(f.created_at)}</div>
-      <div><span>إجمالي الأرباح</span><b>${money(b.total_earned)}</b></div><div><span>اتصرف</span>${money(b.paid)}</div>
-      <div><span>قيد المراجعة</span>${money(b.pending)}</div><div><span>الرصيد</span><b>${money(b.balance)}</b></div>
-    </div>
-    ${f.notes ? `<p class="small"><b>ملاحظات:</b> ${esc(f.notes)}</p>` : ''}
-    <h3 style="margin-top:16px">المناديب (${c.data?.length ?? 0})</h3>
-    <div class="tw"><table class="t"><thead><tr><th>الكود</th><th>الاسم</th><th>الشركة</th><th>الحالة</th><th>الورق</th><th>بداية الشغل</th></tr></thead><tbody>
-    ${(c.data || []).map((x) => `<tr><td class="mono small">${esc(x.code)}</td><td>${esc(x.name)}<div class="small mono muted">0${esc(x.mobile)}</div></td><td>${esc(compName(x.company_id, x.company_name))}</td><td>${chip(CAND_STATUS, x.status)}</td><td>${fmtDate(x.paper_date)}</td><td>${fmtDate(x.start_date)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}
-    </tbody></table></div>
-    <div class="ph" style="margin-top:16px"><h3 style="margin:0">سجل الأرباح</h3>${can('partners') ? '<button class="btn sec sm" data-adj>➕ تسوية يدوية</button>' : ''}</div>
-    <div class="tw"><table class="t"><thead><tr><th>التاريخ</th><th>النوع</th><th>المندوب</th><th>المبلغ</th><th></th></tr></thead><tbody>
-    ${(l.data || []).map((x) => `<tr style="${x.reversed_at ? 'opacity:.5' : ''}"><td>${fmtDate(x.earned_on)}</td><td>${kindTxt(x)}${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}${x.reversed_at ? `<div class="small" style="color:var(--red)">ملغي: ${esc(x.reverse_reason || '')}</div>` : ''}</td><td>${esc((c.data || []).find((k) => k.id === x.candidate_id)?.name || '')}</td><td><b>${money(x.amount)}</b></td><td>${!x.reversed_at && can('partners') ? `<button class="btn dan sm" data-rev="${x.id}">إلغاء</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">—</td></tr>'}
-    </tbody></table></div>
-    <h3 style="margin-top:16px">السحوبات</h3>
-    <div class="tw"><table class="t"><thead><tr><th>التاريخ</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th></tr></thead><tbody>
-    ${(w.data || []).map((x) => `<tr><td>${fmtDate(x.created_at)}</td><td><b>${money(x.amount)}</b></td><td>${esc(x.method)}<div class="small mono muted">${esc(x.details)}</div></td><td>${chip(WD_STATUS, x.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">—</td></tr>'}
-    </tbody></table></div>`, 'wide');
-  const reopen = async () => { m.close(); const { data } = await sb.from('freelancer_balances').select('*').eq('freelancer_id', f.id).maybeSingle(); partnerDetails(f, data); };
-  const adj = $('[data-adj]', m.el);
-  if (adj) adj.onclick = async () => {
-    const amt = await promptBox('تسوية يدوية', 'المبلغ (موجب = إضافة، سالب = خصم)', { type: 'number' }); if (!amt) return;
-    const note = await promptBox('سبب التسوية', 'السبب (هيظهر للشريك)'); if (!note) return;
-    const { error } = await sb.rpc('admin_add_adjustment', { p_freelancer: f.id, p_amount: Number(amt), p_note: note });
-    if (error) return toast(errMsg(error), 'bad'); toast('تم ✅', 'ok'); reopen();
+  if (c.error) throw c.error;
+  const cands = c.data || [], led = l.data || [], wds = w.data || [];
+  const sm = (!sumR.error && sumR.data) || {};
+  const fz = sm.freelancer || { frozen: !!f.frozen_at, frozen_reason: f.frozen_reason, ref_code: f.ref_code };
+  const bal = sm.balance || {};
+  const cnt = sm.counts || {
+    total: cands.length, hired: cands.filter((x) => x.status === 'hired').length,
+    pending: cands.filter((x) => ['submitted', 'new'].includes(x.status)).length, rejected: cands.filter((x) => x.status === 'rejected').length,
   };
-  $$('[data-rev]', m.el).forEach((btn) => btn.onclick = async () => {
-    const r = await promptBox('إلغاء بند أرباح', 'سبب الإلغاء'); if (!r) return;
-    const { error } = await sb.rpc('admin_reverse_ledger', { p_id: Number(btn.dataset.rev), p_reason: r });
-    if (error) return toast(errMsg(error), 'bad'); toast('تم الإلغاء', 'ok'); reopen();
+  const candName = (cid) => cands.find((k) => k.id === cid)?.name || '';
+  const TABS = [['cands', `المناديب (${cands.length})`], ['money', 'الفلوس'], can('partners') && ['msgs', 'الرسايل'], ['notes', 'ملاحظات'], can('audit') && ['log', 'السجل']].filter(Boolean);
+  if (!TABS.some((t) => t[0] === S.profTab)) S.profTab = 'cands';
+  view(`
+    <div class="ph"><button class="btn ghost sm" data-back>→ رجوع للشركاء</button></div>
+    <div class="card prof-h ${fz.frozen ? 'frozen' : ''}">
+      <div class="prof-av">${esc(f.name.trim().slice(0, 1) || '؟')}</div>
+      <div class="prof-id">
+        <h1>${esc(f.name)} ${chip(FL_STATUS, f.status)} ${fz.frozen ? '<span class="chip r">🔒 متجمّد</span>' : ''}</h1>
+        <div class="small muted prof-meta">
+          <a class="mono" href="${waLink(f.mobile)}" target="_blank" rel="noopener">0${esc(f.mobile)}</a>
+          <span>${esc([f.gov, f.region].filter(Boolean).join(' — ') || 'بدون منطقة')}</span>
+          <span>مسجّل ${fmtDate(f.created_at)}</span>
+          ${fz.ref_code ? `<span>كود الإحالة <b class="mono">${esc(fz.ref_code)}</b></span>` : ''}
+          ${f.email ? `<span class="mono">${esc(f.email)}</span>` : ''}
+        </div>
+        ${fz.frozen ? `<div class="prof-fz">🔒 السحب والترشيح موقوفين — السبب: ${esc(fz.frozen_reason || '—')}</div>` : ''}
+      </div>
+      <div class="prof-acts">
+        <button class="btn sec sm" data-as title="بيفتح تطبيق الشريك للقراءة بس">👁️ شوف التطبيق بعينه</button>
+        <button class="btn sec sm" data-stmt>🧾 كشف حساب شهري</button>
+        ${can('partners') ? `<button class="btn sec sm" data-msg>💬 رسالة</button><button class="btn sec sm" data-edit>✏️ تعديل</button>
+          <button class="btn ${fz.frozen ? 'pri' : 'dan'} sm" data-fz>${fz.frozen ? '🔓 فك التجميد' : '🔒 تجميد الأرباح'}</button>` : ''}
+      </div>
+    </div>
+    <div class="grid4" style="margin-top:12px">
+      <div class="card kpi b"><div class="lbl">المناديب</div><div class="val">${cnt.total}</div><div class="small muted">شغالين ${cnt.hired} • مستنيين ${cnt.pending} • مرفوض ${cnt.rejected}</div></div>
+      <div class="card kpi g"><div class="lbl">إجمالي الأرباح</div><div class="val">${money(bal.total_earned)}</div></div>
+      <div class="card kpi a"><div class="lbl">اتصرف</div><div class="val">${money(bal.paid)}</div><div class="small muted">قيد المراجعة ${money(bal.pending)}</div></div>
+      <div class="card kpi p"><div class="lbl">الرصيد المتاح</div><div class="val">${money(bal.balance)}</div></div>
+    </div>
+    <div class="tabs" role="tablist">${TABS.map(([k, t]) => `<button role="tab" data-tab="${k}" class="${k === S.profTab ? 'on' : ''}">${t}</button>`).join('')}</div>
+    <div id="ptab"></div>`);
+
+  const host = $('#ptab');
+  const drawTab = async (k) => {
+    S.profTab = k;
+    $$('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === k));
+    if (k === 'cands') {
+      host.innerHTML = `<div class="card"><div class="tw"><table class="t"><thead><tr><th>الكود</th><th>الاسم</th><th>الشركة</th><th>الحالة</th><th>الورق</th><th>بداية الشغل</th><th></th></tr></thead><tbody>
+        ${cands.map((x) => `<tr><td class="mono small">${esc(x.code)}<div class="muted">${fmtDate(x.created_at)}</div></td><td>${esc(x.name)}<div class="small mono muted">0${esc(x.mobile)}</div></td><td>${esc(compName(x.company_id, x.company_name))}</td><td>${chip(CAND_STATUS, x.status)}</td><td>${fmtDate(x.paper_date)}</td><td>${fmtDate(x.start_date)}</td>
+          <td>${can('couriers') ? `<button class="btn sec sm" data-ced="${x.id}">تعديل</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">لسه مرشّحش حد</td></tr>'}
+        </tbody></table></div></div>`;
+      $$('[data-ced]', host).forEach((b) => b.onclick = () => courierEdit([cands.find((x) => x.id === b.dataset.ced)]));
+    } else if (k === 'money') {
+      host.innerHTML = `<div class="card">
+        <div class="ph" style="margin-bottom:8px"><h3 style="margin:0">سجل الأرباح</h3>${can('partners') ? '<button class="btn sec sm" data-adj>➕ تسوية يدوية</button>' : ''}</div>
+        <div class="tw"><table class="t"><thead><tr><th>التاريخ</th><th>النوع</th><th>المندوب</th><th>المبلغ</th><th></th></tr></thead><tbody>
+        ${led.map((x) => `<tr style="${x.reversed_at ? 'opacity:.5' : ''}"><td>${fmtDate(x.earned_on)}</td><td>${ledKind(x)}${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}${x.reversed_at ? `<div class="small" style="color:var(--red)">ملغي: ${esc(x.reverse_reason || '')}</div>` : ''}</td><td>${esc(candName(x.candidate_id))}</td><td><b>${money(x.amount)}</b></td><td>${!x.reversed_at && can('partners') ? `<button class="btn dan sm" data-rev="${x.id}">إلغاء</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">—</td></tr>'}
+        </tbody></table></div>
+        <h3 style="margin-top:16px">السحوبات</h3>
+        <div class="tw"><table class="t"><thead><tr><th>التاريخ</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th></tr></thead><tbody>
+        ${wds.map((x) => `<tr><td>${fmtDate(x.created_at)}</td><td><b>${money(x.amount)}</b></td><td>${esc(x.method)}<div class="small mono muted">${esc(x.details)}</div></td><td>${chip(WD_STATUS, x.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">—</td></tr>'}
+        </tbody></table></div></div>`;
+      const adj = $('[data-adj]', host);
+      if (adj) adj.onclick = async () => {
+        const amt = await promptBox('تسوية يدوية', 'المبلغ (موجب = إضافة، سالب = خصم)', { type: 'number' }); if (!amt) return;
+        const note = await promptBox('سبب التسوية', 'السبب (هيظهر للشريك)'); if (!note) return;
+        const { error } = await sb.rpc('admin_add_adjustment', { p_freelancer: id, p_amount: Number(amt), p_note: note });
+        if (error) return toast(errMsg(error), 'bad'); toast('تم ✅', 'ok'); go('profile');
+      };
+      $$('[data-rev]', host).forEach((btn) => btn.onclick = async () => {
+        const r = await promptBox('إلغاء بند أرباح', 'سبب الإلغاء'); if (!r) return;
+        const { error } = await sb.rpc('admin_reverse_ledger', { p_id: Number(btn.dataset.rev), p_reason: r });
+        if (error) return toast(errMsg(error), 'bad'); toast('تم الإلغاء', 'ok'); go('profile');
+      });
+    } else if (k === 'msgs') {
+      const list = (msgs.data || []).slice().reverse();
+      host.innerHTML = `<div class="card"><div class="ph" style="margin-bottom:8px"><h3 style="margin:0">آخر الرسايل</h3><button class="btn pri sm" data-openchat>💬 افتح المحادثة</button></div>
+        <div class="bubbles prof-bub">${list.map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}">${esc(m.body)}<span>${new Date(m.created_at).toLocaleString('en-GB')}</span></div>`).join('') || '<div class="empty">مفيش رسايل لسه</div>'}</div></div>`;
+      $('[data-openchat]', host).onclick = () => go('chat', id);
+      const bb = $('.prof-bub', host); bb.scrollTop = bb.scrollHeight;
+    } else if (k === 'notes') {
+      host.innerHTML = `<div class="card stack"><label class="f">ملاحظات داخلية (مش بتظهر للشريك)</label>
+        <textarea class="in" rows="6" data-notes ${can('partners') ? '' : 'readonly'}>${esc(f.notes || '')}</textarea>
+        ${can('partners') ? '<div class="row" style="justify-content:flex-end"><button class="btn pri" data-savenotes>حفظ الملاحظات</button></div>' : ''}</div>`;
+      const sv = $('[data-savenotes]', host);
+      if (sv) sv.onclick = () => busy(sv, async () => {
+        const notes = $('[data-notes]', host).value.trim() || null;
+        const { error } = await sb.from('freelancers').update({ notes }).eq('id', id);
+        if (error) return toast(errMsg(error), 'bad');
+        f.notes = notes; toast('اتحفظت ✅', 'ok');
+      });
+    } else if (k === 'log') {
+      host.innerHTML = '<div class="spin"></div>';
+      const ids = [id, ...cands.map((x) => x.id)].slice(0, 200);
+      const { data, error } = await sb.from('audit_log').select('*').in('record_id', ids).order('at', { ascending: false }).limit(100);
+      if (S.profTab !== 'log' || !host.isConnected) return;
+      if (error) { host.innerHTML = `<div class="card empty">${esc(errMsg(error))}</div>`; return; }
+      const rows = (data || []).filter((a) => ids.includes(a.record_id));
+      host.innerHTML = `<div class="card"><div class="tw"><table class="t"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>التغيير</th></tr></thead><tbody>
+        ${rows.map((a) => `<tr><td class="small">${new Date(a.at).toLocaleString('en-GB')}</td><td class="small mono">${esc(a.actor_email || a.actor_role || 'system')}</td>
+          <td><span class="chip n">${esc(AUD_T[a.table_name] || a.table_name || '')}</span> ${esc(AUD_A[a.action] || a.action)}${a.record_id !== id ? `<div class="small muted">${esc(candName(a.record_id))}</div>` : ''}</td>
+          <td><div class="small" style="max-width:520px;white-space:normal;word-break:break-word">${esc(auditDiff(a)).slice(0, 600)}</div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">مفيش تغييرات مسجّلة</td></tr>'}
+        </tbody></table></div></div>`;
+    }
+  };
+  $$('[data-tab]').forEach((b) => b.onclick = () => drawTab(b.dataset.tab));
+  drawTab(S.profTab);
+
+  $('[data-back]').onclick = () => go('partners');
+  $('[data-as]').onclick = () => window.open('/?as=' + encodeURIComponent(id), '_blank', 'noopener');
+  $('[data-stmt]').onclick = () => statementModal(f, led, wds, candName);
+  const on = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
+  on('[data-msg]', () => go('chat', id));
+  on('[data-edit]', () => partnerEdit(f));
+  on('[data-fz]', async (e) => {
+    const btn = e.currentTarget;
+    let reason = null;
+    if (fz.frozen) {
+      if (!(await confirmBox('فك التجميد', `${f.name} هيرجع يقدر يسحب ويرشّح عادي، وهيوصله إشعار بكده.`, 'فك التجميد', false))) return;
+    } else {
+      reason = await promptBox('تجميد الأرباح', 'سبب التجميد (هيظهر للشريك) — السحب والترشيح هيتوقفوا'); if (!reason) return;
+    }
+    await busy(btn, async () => {
+      const { error } = await sb.rpc('admin_set_frozen', { p_freelancer: id, p_on: !fz.frozen, p_reason: reason });
+      if (error) return toast(errMsg(error), 'bad');
+      toast(fz.frozen ? 'اتفك التجميد ✅' : 'الحساب اتجمّد 🔒', 'ok'); await loadBase(); go('profile');
+    });
   });
+}
+
+// Printable monthly statement: opening balance, every earning/withdrawal in the month with a running balance.
+function statementModal(f, led, wds, candName) {
+  const now = new Date();
+  const def = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const m = modal(`<div class="stmt-bar no-print"><label class="small bold">الشهر</label><input class="in" type="month" value="${def}" max="${def}" data-mon>
+      <span style="flex:1"></span><button class="btn pri sm" data-print>🖨️ طباعة / PDF</button><button class="btn ghost sm" data-close>✕</button></div>
+    <div class="stmt" data-stmt></div>`, 'wide stmt-modal');
+  const dOf = (x) => String(x || '').slice(0, 10);
+  const sum = (arr, k = 'amount') => arr.reduce((t, x) => t + Number(x[k] || 0), 0);
+  const draw = () => {
+    const mon = $('[data-mon]', m.el).value || def;
+    const [y, mo] = mon.split('-').map(Number);
+    const start = `${mon}-01`;
+    const nx = new Date(y, mo, 1);
+    const end = `${nx.getFullYear()}-${String(nx.getMonth() + 1).padStart(2, '0')}-01`;
+    const L = led.filter((x) => !x.reversed_at), W = wds.filter((x) => x.status !== 'rejected');
+    const inM = (d) => d >= start && d < end;
+    const opening = sum(L.filter((x) => dOf(x.earned_on) < start)) - sum(W.filter((x) => dOf(x.created_at) < start));
+    const rows = [
+      ...L.filter((x) => inM(dOf(x.earned_on))).map((x) => {
+        const a = Number(x.amount) || 0;
+        return { d: dOf(x.earned_on), t: `${ledKind(x)}${candName(x.candidate_id) ? ' — ' + candName(x.candidate_id) : ''}${x.note ? ' (' + x.note + ')' : ''}`, cr: a > 0 ? a : 0, db: a < 0 ? -a : 0 };
+      }),
+      ...W.filter((x) => inM(dOf(x.created_at))).map((x) => ({ d: dOf(x.created_at), t: `سحب — ${x.method || ''} (${WD_STATUS[x.status]?.[0] || x.status})`, cr: 0, db: Number(x.amount) || 0 })),
+    ].sort((a, b) => a.d.localeCompare(b.d));
+    let run = opening;
+    const totCr = rows.reduce((t, r) => t + r.cr, 0), totDb = rows.reduce((t, r) => t + r.db, 0);
+    const monthName = new Date(y, mo - 1, 1).toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+    $('[data-stmt]', m.el).innerHTML = `
+      <div class="st-head"><img src="../brand/fs-logo.png" alt="Full Speed"><div><h2>كشف حساب شهري</h2><div class="muted">${esc(monthName)}</div></div></div>
+      <div class="kv st-kv">
+        <div><span>الشريك</span><b>${esc(f.name)}</b></div><div><span>الموبايل</span><span class="mono">0${esc(f.mobile)}</span></div>
+        <div><span>المنطقة</span>${esc([f.gov, f.region].filter(Boolean).join(' — ') || '—')}</div><div><span>تاريخ الإصدار</span>${fmtDate(new Date())}</div>
+      </div>
+      <div class="tw"><table class="t st-t"><thead><tr><th>التاريخ</th><th>البيان</th><th>له (+)</th><th>عليه (−)</th><th>الرصيد</th></tr></thead><tbody>
+        <tr class="st-open"><td>${fmtDate(start)}</td><td>رصيد أول الشهر</td><td></td><td></td><td><b>${money(opening)}</b></td></tr>
+        ${rows.map((r) => { run += r.cr - r.db; return `<tr><td>${fmtDate(r.d)}</td><td>${esc(r.t)}</td><td>${r.cr ? money(r.cr) : ''}</td><td>${r.db ? money(r.db) : ''}</td><td>${money(run)}</td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">مفيش حركات في الشهر ده</td></tr>'}
+        <tr class="st-tot"><td colspan="2">الإجمالي ورصيد آخر الشهر</td><td>${money(totCr)}</td><td>${money(totDb)}</td><td>${money(opening + totCr - totDb)}</td></tr>
+      </tbody></table></div>
+      <p class="small muted">الأرباح الملغية وطلبات السحب المرفوضة مش محسوبة. السحوبات محسوبة بتاريخ الطلب (المدفوعة وقيد المراجعة).</p>
+      <div class="st-foot small muted">Full Speed Logistics — كشف آلي من لوحة الإدارة</div>`;
+  };
+  $('[data-mon]', m.el).oninput = draw;
+  $('[data-print]', m.el).onclick = () => {
+    document.body.classList.add('printing');
+    const done = () => document.body.classList.remove('printing');
+    addEventListener('afterprint', done, { once: true });
+    window.print();
+  };
+  draw();
 }
 
 function partnerEdit(f) {
@@ -398,21 +568,21 @@ function partnerEdit(f) {
         gov: fm.gov.value.trim(), region: fm.region.value.trim(), notes: fm.notes.value.trim() || null,
       }).eq('id', f.id);
       if (error) return ($('[data-err]', fm).textContent = errMsg(error).includes('duplicate') ? 'الإيميل ده مستخدم لشريك تاني' : errMsg(error));
-      m.close(); toast('تم الحفظ ✅', 'ok'); await loadBase(); go('partners');
+      m.close(); toast('تم الحفظ ✅', 'ok'); await loadBase(); go(S.view);
     });
   };
   const pwBtn = $('[data-pw]', m.el) || $('[data-mk]', m.el);
   if (pwBtn) pwBtn.onclick = async () => {
     const p = await promptBox('كلمة مرور جديدة للشريك', '6 حروف/أرقام على الأقل — ابعتها للشريك بنفسك', { type: 'text' });
     if (!p) return; if (p.length < 6) return toast('6 على الأقل', 'bad');
-    try { await fnCall({ action: f.user_id ? 'reset_freelancer_password' : 'create_freelancer_login', freelancer_id: f.id, password: p }); toast('تم ✅', 'ok'); m.close(); await loadBase(); go('partners'); }
+    try { await fnCall({ action: f.user_id ? 'reset_freelancer_password' : 'create_freelancer_login', freelancer_id: f.id, password: p }); toast('تم ✅', 'ok'); m.close(); await loadBase(); go(S.view); }
     catch (e) { toast(errMsg(e), 'bad'); }
   };
   const mob = $('[data-mob]', m.el);
   if (mob) mob.onclick = async () => {
     const v = await promptBox('تغيير رقم الموبايل', 'الرقم الجديد (هيبقى هو اسم الدخول)', { placeholder: '01xxxxxxxxx' });
     if (!v) return;
-    try { await fnCall({ action: 'change_freelancer_mobile', freelancer_id: f.id, mobile: v }); toast('تم تغيير الموبايل ✅', 'ok'); m.close(); await loadBase(); go('partners'); }
+    try { await fnCall({ action: 'change_freelancer_mobile', freelancer_id: f.id, mobile: v }); toast('تم تغيير الموبايل ✅', 'ok'); m.close(); await loadBase(); go(S.view); }
     catch (e) { toast(errMsg(e), 'bad'); }
   };
 }
@@ -430,7 +600,7 @@ async function couriers() {
   const tgt = {}; (rulesR.data || []).forEach((r) => { if (r.kind === 'days') tgt[r.company_id] = Math.max(tgt[r.company_id] || 0, r.min_days); });
   const sel = new Set();
   view(`
-    <div class="ph"><h1>المناديب</h1><button class="btn sec sm" data-csv>⬇️ تقرير مالي Excel</button></div>
+    <div class="ph"><h1>المناديب</h1><div class="row"><div class="seg" role="group" aria-label="طريقة العرض"><button data-mode="table">📋 جدول</button><button data-mode="board">🗂️ لوحة المراحل</button></div><button class="btn sec sm" data-csv>⬇️ تقرير مالي Excel</button></div></div>
     <div class="grid4" style="margin-bottom:12px">
       <div class="card kpi b"><div class="lbl">إجمالي الترشيحات</div><div class="val">${cands.length}</div></div>
       <div class="card kpi g"><div class="lbl">اتعيّنوا</div><div class="val">${cands.filter((c) => c.status === 'hired').length}</div></div>
@@ -444,13 +614,17 @@ async function couriers() {
       <select class="in" data-due><option value="">كل الاستحقاقات</option><option value="paper">بونص ورق بس</option><option value="any">ليه أي بونص</option><option value="none">بدون بونص</option></select>
     </div>
     <div class="bulk hidden" data-bulk>تم تحديد <span data-n></span> <button class="btn pri sm" data-bedit>تحديث جماعي</button><button class="btn ghost sm" data-bclear>إلغاء التحديد</button></div>
-    <div id="tbl"></div>`);
+    <div id="tbl"></div><div id="board" class="hidden"></div>`);
   let rows = [];
   const render = () => {
-    const q = $('[data-q]').value.trim().toLowerCase(), st = $('[data-st]').value, co = $('[data-co]').value, due = $('[data-due]').value;
+    const board = S.courMode === 'board';
+    $('#tbl').classList.toggle('hidden', board); $('#board').classList.toggle('hidden', !board); $('[data-st]').classList.toggle('hidden', board);
+    $$('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === S.courMode));
+    const q = $('[data-q]').value.trim().toLowerCase(), st = board ? '' : $('[data-st]').value, co = $('[data-co]').value, due = $('[data-due]').value;
     rows = cands.filter((c) => (!st || c.status === st) && (!co || (co === 'NONE' ? !c.company_id : c.company_id === co)) &&
       (!due || (due === 'any' ? earned[c.id] > 0 : due === 'none' ? !earned[c.id] : (c.paper_date && !c.start_date))) &&
       (!q || [c.name, c.code, c.mobile, '0' + c.mobile, flName(c.freelancer_id), S.flMap.get(c.freelancer_id)?.mobile].join(' ').toLowerCase().includes(q)));
+    if (board) return drawBoard($('#board'), rows, render);
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (c) => `<input type="checkbox" data-sel="${c.id}" ${sel.has(c.id) ? 'checked' : ''}>`],
       ['الكود', (c) => `<span class="mono small">${esc(c.code)}</span><div class="small muted">${fmtDate(c.created_at)}</div>`],
@@ -470,7 +644,8 @@ async function couriers() {
     } });
   };
   if (S.courSt) { $('[data-st]').value = S.courSt; S.courSt = ''; }
-  const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('couriers')); $('[data-n]').textContent = sel.size; };
+  const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('couriers') || S.courMode === 'board'); $('[data-n]').textContent = sel.size; };
+  $$('[data-mode]').forEach((b) => b.onclick = () => { S.courMode = b.dataset.mode; lsSet('fsa-cour-mode', S.courMode); render(); bulkBar(); });
   $('[data-bclear]').onclick = () => { sel.clear(); render(); bulkBar(); };
   $('[data-bedit]').onclick = () => courierEdit(cands.filter((c) => sel.has(c.id)));
   $$('[data-q],[data-st],[data-co],[data-due]').forEach((el) => el.oninput = render);
@@ -526,15 +701,103 @@ function courierEdit(list) {
     await busy($('button.pri', f), async () => {
       const { error } = await sb.from('candidates').update(upd).in('id', list.map((c) => c.id));
       if (error) return ($('[data-err]', f).textContent = errMsg(error));
-      m.close(); toast('تم الحفظ ✅', 'ok'); go('couriers');
+      m.close(); toast('تم الحفظ ✅', 'ok'); go(S.view);
     });
   };
   const rc = $('[data-recalc]', m.el);
   if (rc) rc.onclick = async () => {
     const r = await promptBox('إعادة حساب البونص', 'السبب (مثلاً: تصحيح تاريخ غلط)'); if (!r) return;
     const { error } = await sb.rpc('admin_recalc_candidate', { p_id: one.id, p_reason: r });
-    if (error) return toast(errMsg(error), 'bad'); m.close(); toast('تمت إعادة الحساب ✅', 'ok'); go('couriers');
+    if (error) return toast(errMsg(error), 'bad'); m.close(); toast('تمت إعادة الحساب ✅', 'ok'); go(S.view);
   };
+}
+
+// ------------------------------------------------------------------ couriers stage board (drag & drop, or "نقل لـ…" on phones)
+const KB_COLS = [
+  ['submitted', 'تحت المراجعة', (c) => c.status === 'submitted'],
+  ['new0', 'مرشح جديد — من غير ورق', (c) => c.status === 'new' && !c.paper_date],
+  ['new1', 'مرشح جديد — خلّص الورق', (c) => c.status === 'new' && !!c.paper_date],
+  ['hired', 'اتعيّن / شغال', (c) => c.status === 'hired'],
+];
+const KB_MOVES = { submitted: 'تحت المراجعة', new0: 'جديد من غير ورق', new1: 'خلّص الورق', hired: 'اتعيّن', suspended: 'موقوف مؤقتاً', rejected: 'مرفوض' };
+const kbColOf = (c) => c.status === 'new' ? (c.paper_date ? 'new1' : 'new0') : c.status;
+
+function drawBoard(host, list, rerender) {
+  const LIM = 60, edit = can('couriers');
+  const age = (c) => { const d = daysBetween(c.created_at, new Date()); return d ? `من ${d} يوم` : 'النهارده'; };
+  const card = (c) => `<div class="kb-card" ${edit ? 'draggable="true"' : ''} data-kc="${c.id}">
+      <div class="kb-t"><b>${esc(c.name)}</b><span class="mono small muted">${esc(c.code || '')}</span></div>
+      <div class="small muted kb-s">${esc(compName(c.company_id, c.company_name))} • ${esc(flName(c.freelancer_id))}</div>
+      <div class="kb-f"><span class="small muted">${c.status === 'hired' && c.start_date ? 'بدأ ' + fmtDate(c.start_date) : age(c)}</span>
+        ${edit ? `<select class="kb-mv" data-mv="${c.id}" aria-label="نقل المندوب لمرحلة تانية"><option value="">نقل لـ…</option>${Object.entries(KB_MOVES).filter(([k]) => k !== kbColOf(c)).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select>` : ''}</div></div>`;
+  const closed = list.filter((c) => ['suspended', 'rejected'].includes(c.status));
+  host.innerHTML = `<div class="kb">${KB_COLS.map(([k, t, fn]) => {
+    const l = list.filter(fn);
+    return `<section class="kb-col" data-col="${k}"><header><b>${t}</b><span class="chip n">${l.length}</span></header>
+      <div class="kb-list">${l.slice(0, LIM).map(card).join('') || `<div class="kb-empty">${edit ? 'اسحب مندوب هنا' : 'فاضي'}</div>`}
+      ${l.length > LIM ? `<div class="small muted kb-more">و${l.length - LIM} كمان — ضيّق بالبحث أو الشركة</div>` : ''}</div></section>`;
+  }).join('')}
+    <section class="kb-col kb-closed"><header><b>موقوف / مرفوض</b><span class="chip n">${closed.length}</span></header>
+      <div class="kb-drops"><div class="kb-drop" data-col="suspended">⏸️ موقوف <b>${closed.filter((c) => c.status === 'suspended').length}</b></div>
+        <div class="kb-drop r" data-col="rejected">✕ مرفوض <b>${closed.filter((c) => c.status === 'rejected').length}</b></div></div>
+      <details ${S.kbOpen ? 'open' : ''}><summary class="small">عرض المناديب (${closed.length})</summary><div class="kb-list">${closed.slice(0, LIM).map(card).join('')}</div></details>
+    </section></div>
+    ${edit ? '<p class="small muted" style="margin:8px 2px 0">اسحب الكارت لمرحلة تانية، أو استخدم "نقل لـ…" من الموبايل. اضغط على الكارت للتعديل الكامل.</p>' : ''}`;
+  const find = (id) => list.find((c) => c.id === id);
+  let dragId = null;
+  $$('[data-kc]', host).forEach((el) => {
+    el.onclick = (e) => { if (!edit || e.target.closest('select')) return; courierEdit([find(el.dataset.kc)]); };
+    el.ondragstart = (e) => { dragId = el.dataset.kc; e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; el.classList.add('drag'); };
+    el.ondragend = () => { el.classList.remove('drag'); $$('.over', host).forEach((z) => z.classList.remove('over')); };
+  });
+  $$('[data-col]', host).forEach((z) => {
+    z.ondragover = (e) => { if (!dragId) return; e.preventDefault(); z.classList.add('over'); };
+    z.ondragleave = (e) => { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); };
+    z.ondrop = (e) => { e.preventDefault(); z.classList.remove('over'); const id = e.dataTransfer.getData('text/plain') || dragId; dragId = null; moveCand(find(id), z.dataset.col, rerender); };
+  });
+  $$('[data-mv]', host).forEach((sel) => sel.onchange = () => { const v = sel.value; sel.value = ''; if (v) moveCand(find(sel.dataset.mv), v, rerender); });
+  const det = $('details', host); if (det) det.ontoggle = () => { S.kbOpen = det.open; };
+}
+
+async function moveCand(c, to, rerender) {
+  if (!c || !can('couriers') || kbColOf(c) === to) return;
+  const upd = {};
+  if (to === 'submitted') upd.status = 'submitted';
+  else if (to === 'new0') {
+    upd.status = 'new';
+    if (c.paper_date) {
+      if (!(await confirmBox('شيل تاريخ الورق؟', `${c.name} متسجّل إنه خلّص الورق يوم ${fmtDate(c.paper_date)}. النقل هنا هيشيل التاريخ ده.`, 'نقل', false))) return;
+      upd.paper_date = null;
+    }
+  } else if (to === 'new1') { upd.status = 'new'; if (!c.paper_date) upd.paper_date = today(); }
+  else { const r = await moveDialog(c, to); if (!r) return; Object.assign(upd, r); }
+  const { error } = await sb.from('candidates').update(upd).eq('id', c.id);
+  if (error) return toast(errMsg(error), 'bad');
+  Object.assign(c, upd);
+  toast(`${c.name} ← ${KB_MOVES[to]} ✅`, 'ok');
+  rerender();
+}
+
+// Extra details for moves that need them: start date when hired, a confirmation when rejecting, an optional note.
+function moveDialog(c, to) {
+  return new Promise((resolve) => {
+    const title = { hired: 'تعيين المندوب', suspended: 'إيقاف مؤقت', rejected: 'رفض المندوب' }[to];
+    const m = modal(`<h2>${title}: ${esc(c.name)}</h2><form class="stack">
+      ${to === 'hired' ? `<div><label class="f">أول يوم شغل</label><input class="in" type="date" name="start" value="${c.start_date || today()}" required></div>` : ''}
+      ${to === 'rejected' ? '<p class="small" style="color:var(--red);margin:0;font-weight:700">رفض المندوب هيلغي أي بونص اتحسب للشريك عليه.</p>' : ''}
+      <div><label class="f">ملاحظة (اختياري)</label><input class="in" name="note" value="${esc(c.admin_note || '')}"></div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn sec" data-no>إلغاء</button><button class="btn ${to === 'rejected' ? 'dan' : 'pri'}">${to === 'rejected' ? 'رفض' : 'تأكيد'}</button></div></form>`);
+    const f = $('form', m.el); let done = false;
+    const fin = (v) => { if (done) return; done = true; m.close(); resolve(v); };
+    $('[data-no]', m.el).onclick = () => fin(null);
+    m.el.addEventListener('click', (e) => { if (e.target === m.el) fin(null); });
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      const u = { status: to, admin_note: f.note.value.trim() || null };
+      if (to === 'hired') u.start_date = f.start.value || today();
+      fin(u);
+    };
+  });
 }
 
 // ------------------------------------------------------------------ courier documents (storage: courier-docs/<freelancer>/<candidate>/)
@@ -1030,16 +1293,19 @@ async function staff() {
   view(`
     <div class="ph"><h1>فريق الإدارة</h1><button class="btn pri" data-add>➕ إضافة عضو</button></div>
     <div class="card small" style="margin-bottom:10px">
-      <b>الصلاحيات:</b> المالك = كل حاجة • مدير = كل حاجة ما عدا الفريق • مالية = عرض + السحوبات • توظيف = عرض + المناديب والوظائف • مشاهدة فقط.
+      <b>الصلاحيات:</b> المالك = كل حاجة • مدير = كل حاجة ما عدا الفريق والرجوع عن التعديلات • مالية = عرض + السحوبات • توظيف = عرض + المناديب والوظائف • مشاهدة فقط.
+      <div class="muted" style="margin-top:4px">زرار <b>تفصيل</b> بيخليك تختار صلاحيات معينة لكل عضو بدل الافتراضي بتاع دوره.</div>
     </div>
     <div id="tbl"></div>`);
   pagedTable($('#tbl'), data, [
     ['الإيميل', (s) => `<span class="mono">${esc(s.email)}</span>`], ['الاسم', (s) => esc(s.name || '')],
     ['الصلاحية', (s) => `<select class="in" style="width:auto" data-role="${s.user_id}">${Object.entries(ROLE_AR).map(([k, t]) => `<option value="${k}" ${k === s.role ? 'selected' : ''}>${t}</option>`).join('')}</select>`],
+    ['الصلاحيات', (s) => s.role === 'owner' ? '<span class="small muted">كل حاجة</span>' : `${s.perms ? '<span class="chip p">مخصّص</span> ' : ''}<button class="btn sec sm" data-perm="${s.user_id}">تفصيل</button>`],
     ['مفعّل', (s) => `<input type="checkbox" data-act="${s.user_id}" ${s.active ? 'checked' : ''}>`],
     ['أضيف', (s) => fmtDate(s.created_at)],
   ], { onRender: (h) => {
     $$('[data-role]', h).forEach((x) => x.onchange = async () => { const { error } = await sb.from('staff').update({ role: x.value }).eq('user_id', x.dataset.role); toast(error ? errMsg(error) : 'تم ✅', error ? 'bad' : 'ok'); if (error) go('staff'); });
+    $$('[data-perm]', h).forEach((b) => b.onclick = () => permsModal(data.find((s) => s.user_id === b.dataset.perm)));
     $$('[data-act]', h).forEach((x) => x.onchange = async () => { const { error } = await sb.from('staff').update({ active: x.checked }).eq('user_id', x.dataset.act); toast(error ? errMsg(error) : 'تم ✅', error ? 'bad' : 'ok'); if (error) go('staff'); });
   } });
   $('[data-add]').onclick = () => {
@@ -1107,28 +1373,287 @@ async function errors() {
   errorsBadge();
 }
 
+// ------------------------------------------------------------------ staff: fine-grained permissions
+function permsModal(s) {
+  if (!s) return;
+  const cur = new Set(s.perms ?? ROLE_PERMS[s.role] ?? []);
+  const m = modal(`<h2>صلاحيات ${esc(s.name || s.email)}</h2>
+    <p class="small muted" style="margin-top:-6px">الدور: <b>${ROLE_AR[s.role] || s.role}</b> — ${s.perms ? 'الصلاحيات دي متخصّصة يدوياً.' : 'دي الصلاحيات الافتراضية للدور.'}</p>
+    <div class="perm-grid">${Object.entries(PERM_AR).map(([k, t]) => `<label class="perm"><input type="checkbox" value="${k}" ${cur.has(k) ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div>
+    <p class="small muted">إدارة الفريق والرجوع عن التعديلات للمالك بس.</p>
+    <div class="err" data-err></div>
+    <div class="row" style="justify-content:space-between"><button class="btn ghost sm" data-reset ${s.perms ? '' : 'disabled'}>↺ رجّعها لافتراضي الدور</button>
+      <div class="row"><button class="btn sec" data-close>إلغاء</button><button class="btn pri" data-save>حفظ</button></div></div>`);
+  const save = (perms, btn) => busy(btn, async () => {
+    const { error } = await sb.rpc('admin_set_staff_perms', { p_user: s.user_id, p_perms: perms });
+    if (error) return ($('[data-err]', m.el).textContent = errMsg(error));
+    m.close(); toast('اتحفظت الصلاحيات ✅ — هتسري من أول ما العضو يفتح اللوحة', 'ok'); go('staff');
+  });
+  $('[data-save]', m.el).onclick = (e) => {
+    const p = $$('.perm input:checked', m.el).map((x) => x.value);
+    if (!p.length) return ($('[data-err]', m.el).textContent = 'اختار صلاحية واحدة على الأقل (أو اقفل الحساب من عمود "مفعّل").');
+    save(p, e.currentTarget);
+  };
+  $('[data-reset]', m.el).onclick = (e) => save(null, e.currentTarget);
+}
+
+// ------------------------------------------------------------------ settings helpers
+const DEF_LEVELS = [{ n: 'مبتدئ', min: 0, c: '#8a86a8', i: '🌱' }, { n: 'برونزي', min: 1, c: '#c8661b', i: '🥉' }, { n: 'فضي', min: 5, c: '#64748b', i: '🥈' }, { n: 'ذهبي', min: 15, c: '#c99400', i: '🥇' }, { n: 'ماسي', min: 30, c: '#7b5cff', i: '💎' }];
+const LINK_AR = { home: 'الرئيسية', jobs: 'الوظايف', couriers: 'مناديبي', wallet: 'المحفظة', me: 'حسابي', chat: 'المحادثة' };
+async function loadSettings() {
+  const { data, error } = await sb.from('app_settings').select('key,value,updated_at');
+  if (error) throw error;
+  S.settings = Object.fromEntries((data || []).map((r) => [r.key, r]));
+  return S.settings;
+}
+const levelsOf = () => { const v = S.settings.levels?.value; return (Array.isArray(v) && v.length ? v : DEF_LEVELS).slice().sort((a, b) => a.min - b.min); };
+function filterTxt(fl) {
+  fl = fl || {}; const p = [];
+  if (fl.gov) p.push(fl.gov);
+  const mn = Number(fl.min_hired) || 0, mx = fl.max_hired == null ? -1 : Number(fl.max_hired);
+  if (mn || mx >= 0) p.push(mx >= 0 ? `${mn}–${mx} مندوب شغال` : `${mn}+ مندوب شغال`);
+  if (Number(fl.inactive_days)) p.push(`مرشّحوش من ${fl.inactive_days} يوم`);
+  return p.length ? p.join(' • ') : 'كل الشركاء المفعّلين';
+}
+
+// ------------------------------------------------------------------ broadcast to a partner segment
+async function broadcast() {
+  await loadSettings().catch(() => {});
+  const lv = levelsOf();
+  const hist = await sb.from('audit_log').select('id,at,actor_email,after').eq('action', 'broadcast').order('at', { ascending: false }).limit(10);
+  view(`<div class="ph"><h1>📣 رسالة جماعية</h1><span class="small muted">بتوصل إشعار جوه التطبيق، وعلى الموبايل للي مفعّل الإشعارات</span></div>
+    <div class="bc-grid">
+      <form class="card stack" data-bc>
+        <h3 style="margin:0">مين يستلم؟</h3>
+        <div class="grid3">
+          <div><label class="f">المحافظة</label><select class="in" name="gov"><option value="">كل المحافظات</option>${GOVS.map((g) => `<option>${g}</option>`).join('')}</select></div>
+          <div><label class="f">المستوى</label><select class="in" name="lvl"><option value="">كل المستويات</option>${lv.map((l, i) => `<option value="${i}">${esc(l.i || '')} ${esc(l.n)} (${lv[i + 1] ? `${l.min}–${lv[i + 1].min - 1}` : `${l.min}+`} شغالين)</option>`).join('')}</select></div>
+          <div><label class="f">النشاط</label><select class="in" name="inactive"><option value="0">الكل</option><option value="7">مرشّحوش حد من أسبوع</option><option value="14">مرشّحوش حد من أسبوعين</option><option value="30">مرشّحوش حد من شهر</option><option value="60">مرشّحوش حد من شهرين</option></select></div>
+        </div>
+        <div class="bc-count" data-count>…</div>
+        <h3 style="margin:6px 0 0">الرسالة</h3>
+        <div><label class="f">العنوان</label><input class="in" name="title" maxlength="120" required placeholder="مثلاً: بونص زيادة الأسبوع ده 🔥"></div>
+        <div><label class="f">التفاصيل</label><textarea class="in" name="body" maxlength="500" rows="4" placeholder="اكتب التفاصيل اللي الشريك محتاج يعرفها"></textarea><div class="small muted" data-len>0 / 500</div></div>
+        <div><label class="f">لما يدوس على الإشعار يفتح</label><select class="in" name="link">${Object.entries(LINK_AR).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn pri" data-send>📣 ابعت</button></div>
+        <p class="small muted" style="margin:0">بتروح للشركاء المفعّلين بس. الوظايف الجديدة ليها إشعار تلقائي منفصل (من صفحة الإعدادات).</p>
+      </form>
+      <div class="stack">
+        <div class="card"><h3>معاينة</h3><div class="bc-prev"><span class="bc-ic">📣</span><div><b data-pt>العنوان</b><div class="small" data-pb>التفاصيل…</div></div></div></div>
+        <div class="card"><h3>آخر 10 رسايل</h3>${(hist.data || []).map((h) => { const af = h.after || {}; return `<div class="bc-h">
+          <div class="row" style="justify-content:space-between;gap:6px"><b>${esc(af.title || '')}</b><span class="chip g">${Number(af.recipients) || 0} شريك</span></div>
+          ${af.body ? `<div class="small">${esc(af.body)}</div>` : ''}
+          <div class="small muted">${new Date(h.at).toLocaleString('en-GB')} • ${esc(h.actor_email || '')} • ${esc(filterTxt(af.filter))}</div></div>`; }).join('') || '<div class="empty">لسه مفيش رسايل اتبعتت</div>'}</div>
+      </div>
+    </div>`);
+  const f = $('[data-bc]');
+  const filt = () => {
+    const p = {};
+    if (f.gov.value) p.gov = f.gov.value;
+    if (f.lvl.value !== '') { const i = Number(f.lvl.value); p.min_hired = lv[i].min; p.max_hired = lv[i + 1] ? lv[i + 1].min - 1 : -1; }
+    if (Number(f.inactive.value)) p.inactive_days = Number(f.inactive.value);
+    return p;
+  };
+  let tmr, seq = 0, n = null;
+  const recount = () => {
+    clearTimeout(tmr); n = null;
+    $('[data-count]').innerHTML = '<span class="muted">جاري العد…</span>';
+    tmr = setTimeout(async () => {
+      const my = ++seq;
+      const { data, error } = await sb.rpc('admin_broadcast_count', { p_filter: filt() });
+      const el = $('[data-count]'); if (my !== seq || !el) return;
+      n = error ? null : Number(data) || 0;
+      el.innerHTML = error ? `<span style="color:var(--red)">${esc(errMsg(error))}</span>` : `👥 هتوصل لـ <b>${n}</b> شريك${n ? '' : ' — غيّر الفلتر'}`;
+    }, 350);
+  };
+  const prev = () => {
+    $('[data-pt]').textContent = f.title.value.trim() || 'العنوان';
+    $('[data-pb]').textContent = f.body.value.trim() || 'التفاصيل…';
+    $('[data-len]').textContent = `${f.body.value.length} / 500`;
+  };
+  ['gov', 'lvl', 'inactive'].forEach((k) => f[k].onchange = recount);
+  f.title.oninput = prev; f.body.oninput = prev;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const title = f.title.value.trim(); if (!title) return f.title.focus();
+    if (n === null) return toast('استنى لحد ما العدد يظهر', 'bad');
+    if (!n) return toast('مفيش شركاء في الشريحة دي', 'bad');
+    if (!(await confirmBox('تأكيد الإرسال', `"${title}" هتوصل لـ ${n} شريك (${filterTxt(filt())}). مينفعش ترجع فيها بعد الإرسال.`, 'ابعت', false))) return;
+    await busy($('[data-send]', f), async () => {
+      const { data, error } = await sb.rpc('admin_broadcast', { p_title: title, p_body: f.body.value.trim(), p_filter: filt(), p_link: f.link.value });
+      if (error) return toast(errMsg(error), 'bad');
+      toast(`اتبعتت لـ ${data ?? n} شريك ✅`, 'ok'); go('broadcast');
+    });
+  };
+  recount(); prev();
+}
+
+// ------------------------------------------------------------------ app settings (partner app behaviour)
+const FEAT_AR = {
+  chat: ['💬 المحادثة مع الإدارة', 'صفحة المحادثة في تطبيق الشريك'],
+  join: ['🔗 تسجيل المناديب بلينك الشريك', 'صفحة التسجيل العامة واللينك/QR'],
+  story: ['🖼️ صور الستوري للوظايف', 'زرار عمل صورة ستوري للوظيفة'],
+  passkey: ['👆 الدخول بالبصمة', 'تفعيل ودخول بالبصمة / الوش'],
+  push_prompt: ['🔔 اقتراح تفعيل الإشعارات', 'الكارت اللي بيطلب من الشريك يفعّل الإشعارات'],
+  map: ['🗺️ خريطة الوظايف', 'عرض الوظايف على الخريطة وأقرب وظيفة'],
+};
+const TONE_AR = { info: 'معلومة (أزرق)', success: 'خبر حلو (أخضر)', warning: 'تنبيه (برتقالي)' };
+const JB_AR = { all: ['كل الشركاء المفعّلين', 'أي وظيفة جديدة توصل إشعار لكل الشركاء'], gov: ['شركاء نفس المحافظة بس', 'الإشعار يروح للشركاء اللي في محافظة الوظيفة'], off: ['مقفول', 'مفيش إشعار تلقائي للوظايف الجديدة'] };
+
+async function settings() {
+  await loadSettings();
+  const st = S.settings;
+  const an = { on: false, text: '', tone: 'info', link: '', ...(st.announcement?.value || {}) };
+  const ft = { chat: true, join: true, story: true, passkey: true, push_prompt: true, map: true, ...(st.features?.value || {}) };
+  const jb = typeof st.job_broadcast?.value === 'string' ? st.job_broadcast.value : 'all';
+  let lv = levelsOf().map((l) => ({ ...l }));
+  const upd = (k) => st[k]?.updated_at ? `<span class="small muted">آخر تعديل ${new Date(st[k].updated_at).toLocaleString('en-GB')}</span>` : '';
+  view(`<div class="ph"><h1>⚙️ الإعدادات</h1><span class="small muted">التغيير بيظهر في تطبيق الشركاء فوراً وبيتسجّل في سجل التغييرات</span></div>
+    <div class="set-grid">
+      <form class="card stack" data-s="announcement">
+        <div class="set-h"><h3>📢 بانر إعلان للشركاء</h3>${upd('announcement')}</div>
+        <label class="sw"><input type="checkbox" name="on" ${an.on ? 'checked' : ''}><span>البانر ظاهر في التطبيق</span></label>
+        <div><label class="f">نص الإعلان</label><textarea class="in" name="text" maxlength="240" rows="2" placeholder="مثلاً: السحوبات هتتحوّل يوم الخميس بدل الأربع">${esc(an.text)}</textarea></div>
+        <div class="grid2"><div><label class="f">اللون</label><select class="in" name="tone">${Object.entries(TONE_AR).map(([k, t]) => `<option value="${k}" ${k === an.tone ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+          <div><label class="f">رابط (اختياري)</label><input class="in" name="link" value="${esc(an.link)}" placeholder="jobs أو https://…" dir="ltr"></div></div>
+        <div class="small muted">الرابط ممكن يكون صفحة في التطبيق (${Object.keys(LINK_AR).join(', ')}) أو لينك خارجي يبدأ بـ https://</div>
+        <div data-ap></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn pri">حفظ الإعلان</button></div>
+      </form>
+      <form class="card stack" data-s="features">
+        <div class="set-h"><h3>🎛️ مميزات التطبيق</h3>${upd('features')}</div>
+        ${Object.entries(FEAT_AR).map(([k, [t, d]]) => `<label class="sw"><input type="checkbox" name="${k}" ${ft[k] !== false ? 'checked' : ''}><span><b>${t}</b><span class="small muted">${d}</span></span></label>`).join('')}
+        <div class="row" style="justify-content:flex-end"><button class="btn pri">حفظ المميزات</button></div>
+      </form>
+      <form class="card stack" data-s="job_broadcast">
+        <div class="set-h"><h3>🚀 إعلان الوظايف الجديدة</h3>${upd('job_broadcast')}</div>
+        ${Object.entries(JB_AR).map(([k, [t, d]]) => `<label class="sw"><input type="radio" name="jb" value="${k}" ${k === jb ? 'checked' : ''}><span><b>${t}</b><span class="small muted">${d}</span></span></label>`).join('')}
+        <div class="row" style="justify-content:flex-end"><button class="btn pri">حفظ</button></div>
+      </form>
+      <form class="card stack set-wide" data-s="levels">
+        <div class="set-h"><h3>🏅 مستويات الشركاء</h3>${upd('levels')}</div>
+        <p class="small muted" style="margin:0">المستوى بيتحدد بعدد المناديب الشغالين (اتعيّنوا). أول مستوى لازم يبدأ من 0.</p>
+        <div class="lv-row lv-hd small muted"><span>أيقونة</span><span>الاسم</span><span>من كام شغال</span><span>اللون</span><span>شكله</span><span></span></div>
+        <div data-lv></div>
+        <div class="row" style="justify-content:space-between"><button type="button" class="btn sec sm" data-lvadd>➕ مستوى جديد</button><button class="btn pri">حفظ المستويات</button></div>
+      </form>
+    </div>`);
+
+  const save = (form, key, value) => busy($('button.pri', form), async () => {
+    const { error } = await sb.rpc('admin_set_setting', { p_key: key, p_value: value });
+    if (error) return toast(errMsg(error), 'bad');
+    toast('اتحفظ ✅', 'ok');
+    await loadSettings().catch(() => {});
+    const h = $('.set-h', form); const u = $('.small', h); const t = `آخر تعديل ${new Date().toLocaleString('en-GB')}`;
+    if (u) u.textContent = t; else h.insertAdjacentHTML('beforeend', `<span class="small muted">${t}</span>`);
+  });
+
+  // announcement
+  const fa = $('[data-s=announcement]');
+  const annPrev = () => {
+    const t = fa.text.value.trim();
+    $('[data-ap]').innerHTML = t ? `<div class="ann-prev ${esc(fa.tone.value)} ${fa.on.checked ? '' : 'off'}">📢 <span>${esc(t)}</span>${fa.link.value.trim() ? ' <u>التفاصيل ←</u>' : ''}${fa.on.checked ? '' : '<em>(مخفي)</em>'}</div>` : '';
+  };
+  ['text', 'tone', 'link', 'on'].forEach((k) => fa[k].addEventListener('input', annPrev));
+  fa.onsubmit = (e) => {
+    e.preventDefault();
+    const v = { on: fa.on.checked, text: fa.text.value.trim(), tone: fa.tone.value, link: fa.link.value.trim() };
+    if (v.on && !v.text) return toast('اكتب نص الإعلان الأول', 'bad');
+    if (v.link && !LINK_AR[v.link] && !/^https:\/\/\S+$/.test(v.link)) return toast('الرابط لازم يكون اسم صفحة أو لينك يبدأ بـ https://', 'bad');
+    save(fa, 'announcement', v);
+  };
+  annPrev();
+
+  // features
+  const ff = $('[data-s=features]');
+  ff.onsubmit = (e) => { e.preventDefault(); save(ff, 'features', Object.fromEntries(Object.keys(FEAT_AR).map((k) => [k, ff[k].checked]))); };
+
+  // new-job broadcast
+  const fj = $('[data-s=job_broadcast]');
+  fj.onsubmit = (e) => { e.preventDefault(); const v = $('input[name=jb]:checked', fj)?.value || 'all'; save(fj, 'job_broadcast', v); };
+
+  // levels
+  const fl = $('[data-s=levels]');
+  const okColor = (c) => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#10a861';
+  const lvChip = (l) => `<span class="lv-chip" style="background:${okColor(l.c)}1f;color:${okColor(l.c)}">${esc(l.i || '')} ${esc(l.n || '—')}</span>`;
+  const drawLv = () => {
+    $('[data-lv]', fl).innerHTML = lv.map((l, i) => `<div class="lv-row" data-i="${i}">
+      <input class="in lv-i" data-k="i" value="${esc(l.i || '')}" maxlength="4" aria-label="أيقونة">
+      <input class="in" data-k="n" value="${esc(l.n || '')}" maxlength="30" placeholder="اسم المستوى" aria-label="الاسم">
+      <input class="in" type="number" min="0" step="1" data-k="min" value="${Number(l.min) || 0}" aria-label="من كام مندوب شغال">
+      <input class="in lv-c" type="color" data-k="c" value="${okColor(l.c)}" aria-label="اللون">
+      <span data-chip>${lvChip(l)}</span>
+      <button type="button" class="btn ghost sm" data-del="${i}" ${lv.length < 2 ? 'disabled' : ''} aria-label="حذف المستوى">✕</button></div>`).join('');
+    $$('.lv-row[data-i]', fl).forEach((row) => {
+      const l = lv[Number(row.dataset.i)];
+      $$('[data-k]', row).forEach((inp) => inp.oninput = () => { l[inp.dataset.k] = inp.dataset.k === 'min' ? Number(inp.value) : inp.value; $('[data-chip]', row).innerHTML = lvChip(l); });
+    });
+    $$('[data-del]', fl).forEach((b) => b.onclick = () => { lv.splice(Number(b.dataset.del), 1); drawLv(); });
+  };
+  $('[data-lvadd]', fl).onclick = () => { lv.push({ i: '⭐', n: '', min: Math.max(0, ...lv.map((l) => Number(l.min) || 0)) + 5, c: '#10a861' }); drawLv(); };
+  fl.onsubmit = (e) => {
+    e.preventDefault();
+    const clean = lv.map((l) => ({ n: String(l.n || '').trim(), min: Math.max(0, Math.floor(Number(l.min) || 0)), c: okColor(l.c), i: String(l.i || '').trim() })).sort((a, b) => a.min - b.min);
+    if (clean.some((l) => !l.n)) return toast('كل مستوى لازم يكون ليه اسم', 'bad');
+    if (clean[0].min !== 0) return toast('أول مستوى لازم يبدأ من 0', 'bad');
+    if (new Set(clean.map((l) => l.min)).size !== clean.length) return toast('مينفعش مستويين يبدأوا من نفس العدد', 'bad');
+    lv = clean; drawLv(); save(fl, 'levels', clean);
+  };
+  drawLv();
+}
+
 // ------------------------------------------------------------------ audit
+const AUD_T = { freelancers: 'شريك', candidates: 'مندوب', withdrawals: 'سحب', companies: 'شركة', bonus_rules: 'قاعدة بونص', jobs: 'وظيفة', bonus_ledger: 'أرباح', staff: 'فريق', notifications: 'إشعارات', app_settings: 'إعدادات' };
+const AUD_A = { insert: 'إضافة', update: 'تعديل', delete: 'حذف', broadcast: 'رسالة جماعية' };
+const REVERTABLE = ['candidates', 'freelancers', 'jobs', 'companies', 'bonus_rules'];
+const audV = (v) => v && typeof v === 'object' ? JSON.stringify(v) : v;
+function auditDiff(a) {
+  if (a.action === 'broadcast' && a.after) return `${a.after.title || ''} — ${a.after.recipients ?? 0} شريك (${filterTxt(a.after.filter)})`;
+  if (!a.before || !a.after) {
+    const o = a.after || a.before; if (!o) return '';
+    return Object.entries(o).filter(([k]) => ['name', 'status', 'amount', 'title', 'email', 'role', 'key', 'value'].includes(k)).map(([k, v]) => `${k}: ${audV(v)}`).join(' • ');
+  }
+  return Object.keys(a.after).filter((k) => k !== 'updated_at' && JSON.stringify(a.before[k]) !== JSON.stringify(a.after[k])).map((k) => `${k}: ${audV(a.before[k]) ?? '∅'} ← ${audV(a.after[k]) ?? '∅'}`).join(' • ');
+}
 async function audit() {
   const { data, error } = await sb.from('audit_log').select('*').order('at', { ascending: false }).limit(500);
   if (error) throw error;
-  const T = { freelancers: 'شريك', candidates: 'مندوب', withdrawals: 'سحب', companies: 'شركة', bonus_rules: 'قاعدة بونص', jobs: 'وظيفة', bonus_ledger: 'أرباح', staff: 'فريق' };
-  const diff = (a) => {
-    if (!a.before || !a.after) return a.after ? Object.entries(a.after).filter(([k]) => ['name', 'status', 'amount', 'title', 'email', 'role'].includes(k)).map(([k, v]) => `${k}: ${v}`).join(' • ') : '';
-    return Object.keys(a.after).filter((k) => k !== 'updated_at' && JSON.stringify(a.before[k]) !== JSON.stringify(a.after[k])).map((k) => `${k}: ${a.before[k] ?? '∅'} ← ${a.after[k] ?? '∅'}`).join(' • ');
-  };
-  view(`<div class="ph"><h1>سجل التغييرات</h1><span class="small muted">آخر 500 عملية</span></div>
-    <div class="tools"><select class="in" data-t><option value="">كل الجداول</option>${Object.entries(T).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select><input class="in q" placeholder="بحث بالإيميل أو المحتوى" data-q></div><div id="tbl"></div>`);
+  const actors = [...new Set(data.map((a) => a.actor_email).filter(Boolean))].sort();
+  const rv = can('revert');
+  view(`<div class="ph"><h1>سجل التغييرات</h1><span class="small muted">آخر 500 عملية${rv ? ' • تقدر ترجّع أي تعديل على مندوب/شريك/وظيفة/شركة/بونص' : ''}</span></div>
+    <div class="tools">
+      <select class="in" data-t><option value="">كل الأنواع</option>${Object.entries(AUD_T).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select>
+      <select class="in" data-a><option value="">كل المستخدمين</option>${actors.map((e) => `<option>${esc(e)}</option>`).join('')}</select>
+      <label class="pill-chk"><input type="checkbox" data-today> النهارده بس</label>
+      <input class="in q" placeholder="بحث في المحتوى" data-q>
+    </div><div id="tbl"></div>`);
+  const dayStr = new Date().toDateString();
   const render = () => {
-    const t = $('[data-t]').value, q = $('[data-q]').value.trim().toLowerCase();
-    const rows = data.filter((a) => (!t || a.table_name === t) && (!q || JSON.stringify(a).toLowerCase().includes(q)));
-    pagedTable($('#tbl'), rows, [
+    const t = $('[data-t]').value, who = $('[data-a]').value, td = $('[data-today]').checked, q = $('[data-q]').value.trim().toLowerCase();
+    const rows = data.filter((a) => (!t || a.table_name === t) && (!who || a.actor_email === who) && (!td || new Date(a.at).toDateString() === dayStr) &&
+      (!q || JSON.stringify(a).toLowerCase().includes(q)));
+    const cols = [
       ['الوقت', (a) => `<span class="small">${new Date(a.at).toLocaleString('en-GB')}</span>`],
       ['المستخدم', (a) => `<span class="small mono">${esc(a.actor_email || a.actor_role || 'system')}</span>`],
-      ['العملية', (a) => `<span class="chip n">${esc(T[a.table_name] || a.table_name || '')}</span> ${esc(a.action)}`],
-      ['التغيير', (a) => `<div class="small" style="max-width:520px;white-space:normal;word-break:break-word">${esc(diff(a)).slice(0, 600)}</div>`],
-    ]);
+      ['العملية', (a) => `<span class="chip n">${esc(AUD_T[a.table_name] || a.table_name || '')}</span> ${esc(AUD_A[a.action] || a.action)}`],
+      ['التغيير', (a) => `<div class="small" style="max-width:520px;white-space:normal;word-break:break-word">${esc(auditDiff(a)).slice(0, 600)}</div>`],
+    ];
+    if (rv) cols.push(['', (a) => a.action === 'update' && REVERTABLE.includes(a.table_name) ? `<button class="btn sec sm" data-rv="${a.id}" title="رجّع القيم اللي قبل التعديل ده">↩️ رجّع</button>` : '']);
+    pagedTable($('#tbl'), rows, cols, { onRender: (h) => {
+      $$('[data-rv]', h).forEach((b) => b.onclick = async () => {
+        const a = data.find((x) => String(x.id) === b.dataset.rv); if (!a) return;
+        if (!(await confirmBox('الرجوع عن التعديل', `${AUD_T[a.table_name] || a.table_name} هيرجع للقيم اللي كانت قبل التعديل ده (${new Date(a.at).toLocaleString('en-GB')}):\n${auditDiff(a).slice(0, 400)}`, 'رجّع', false))) return;
+        await busy(b, async () => {
+          const { data: r, error: er } = await sb.rpc('admin_revert_audit', { p_id: a.id });
+          if (er) return toast(errMsg(er), 'bad');
+          toast(r === 'nothing' ? 'مفيش فرق يترجع' : 'اترجع ✅ — والرجوع نفسه اتسجّل في السجل', 'ok');
+          await loadBase(); go('audit');
+        });
+      });
+    } });
   };
-  $$('[data-t],[data-q]').forEach((el) => el.oninput = render);
+  $$('[data-t],[data-a],[data-today],[data-q]').forEach((el) => el.oninput = render);
+  $('[data-today]').onchange = render;
   render();
 }
 
