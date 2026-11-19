@@ -28,6 +28,7 @@ const PERM_AR = {
 };
 const ICONS = {
   dash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  master: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3"/><path d="M16 7l3 3M14 9l2 2"/></svg>`,
   partners: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="7" r="3.5"/><path d="M2 21c0-3.6 2.7-6.5 6-6.5S14 17.4 14 21"/><circle cx="17" cy="8.5" r="3"/><path d="M14 21c0-3 2.1-5.5 5.5-5.5"/></svg>`,
   couriers: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="17" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="M8.5 17h7"/><path d="M5 17H3v-5h9l2.5-5h2l1.5 7"/></svg>`,
   withdrawals: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><circle cx="12" cy="15.5" r="2" fill="currentColor" stroke="none"/></svg>`,
@@ -42,7 +43,7 @@ const ICONS = {
   fraud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
 };
 const NAV = [
-  ['dash', 'لوحة المؤشرات', 'view'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
+  ['dash', 'لوحة المؤشرات', 'view'], ['master', 'ماستر كي', 'owneronly'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
   ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['broadcast', 'رسالة جماعية', 'broadcast'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
   ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['settings', 'الإعدادات', 'settings'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
 ];
@@ -93,7 +94,7 @@ async function boot() {
   const pr = await sb.rpc('my_perms');
   S.perms = !pr.error && Array.isArray(pr.data) ? pr.data : null;
   $('#meEmail').textContent = st.email; $('#meRole').textContent = ROLE_AR[st.role] + (st.perms && st.role !== 'owner' ? ' • صلاحيات مخصّصة' : '');
-  $('#nav').innerHTML = NAV.filter((n) => can(n[2])).map((n) => `<button data-go="${n[0]}"><span class="ico">${ICONS[n[0]] || ''}</span><span class="lbl">${n[1]}</span><span class="badge hidden" data-badge="${n[0]}"></span></button>`).join('');
+  $('#nav').innerHTML = NAV.filter((n) => n[2] === 'owneronly' ? S.me?.role === 'owner' : can(n[2])).map((n) => `<button data-go="${n[0]}"><span class="ico">${ICONS[n[0]] || ''}</span><span class="lbl">${n[1]}</span><span class="badge hidden" data-badge="${n[0]}"></span></button>`).join('');
   $$('#nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
   show('app');
   renderPushCtl();
@@ -168,7 +169,7 @@ async function chatBadge() {
   bc.textContent = count || ''; bc.classList.toggle('hidden', !count);
 }
 function go(v, arg) {
-  const views = { dash, partners, profile, couriers, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
+  const views = { dash, master, partners, profile, couriers, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
   if (!views[v]) v = 'dash';
   S.view = v;
   if (S.poll) { clearInterval(S.poll); S.poll = null; }
@@ -341,6 +342,50 @@ async function partners() {
     ['التاريخ', 'الاسم', 'الموبايل', 'الإيميل', 'المحافظة', 'المنطقة', 'الحالة', 'المناديب', 'شغالين', 'إجمالي الأرباح', 'اتصرف', 'قيد المراجعة', 'الرصيد'],
     rows.map((f) => { const b = bMap.get(f.id) || {}; return [fmtDate(f.created_at), f.name, '0' + f.mobile, f.email, f.gov, f.region, f.status, cc[f.id]?.t ?? 0, cc[f.id]?.h ?? 0, b.total_earned, b.paid, b.pending, b.balance]; }));
   render(); bulkBar();
+}
+
+// ------------------------------------------------------------------ master key (owner-only: open any partner's app read-only)
+const openAs = (id) => window.open('/?as=' + encodeURIComponent(id), '_blank', 'noopener');
+async function master() {
+  if (S.me?.role !== 'owner') { view('<div class="card empty">الصفحة دي للمالك بس.</div>'); return; }
+  view(`
+    <div class="page-h"><div><h2>🔑 الماستر كي</h2><p class="muted small" style="margin:.2em 0 0">تخش بيه على تطبيق أي شريك وتشوف كل حاجة بعينه — <b>عرض بس</b>، مفيش أي حاجة بتتغيّر، والشريك مش بيحس بحاجة.</p></div></div>
+    <div class="card" style="margin-top:12px">
+      <label class="f">دوّر على الشريك</label>
+      <input class="in" data-mq autocomplete="off" placeholder="بالاسم، الموبايل، كود الإحالة، أو المنطقة…" inputmode="search">
+      <div class="small muted" style="margin-top:6px" data-mcount></div>
+      <div data-mlist style="margin-top:10px"></div>
+    </div>`);
+  const input = $('[data-mq]'), list = $('[data-mlist]'), count = $('[data-mcount]');
+  const render = () => {
+    const raw = input.value.trim();
+    const q = raw.toLowerCase(), qm = normMobile(raw);
+    let rows = S.fl.filter((f) => !f.duplicate_of);
+    if (raw) rows = rows.filter((f) =>
+      (f.name || '').toLowerCase().includes(q) ||
+      (qm && f.mobile && f.mobile.includes(qm)) ||
+      (f.ref_code || '').toLowerCase().includes(q) ||
+      (f.email || '').toLowerCase().includes(q) ||
+      [f.gov, f.region].filter(Boolean).join(' ').toLowerCase().includes(q));
+    count.textContent = raw ? `${rows.length} نتيجة` : `${rows.length} شريك إجمالي — اكتب للبحث`;
+    const slice = rows.slice(0, 40);
+    list.innerHTML = slice.map((f) => `
+      <div class="mk-row">
+        <div class="mk-av">${esc((f.name || '؟').trim().slice(0, 1))}</div>
+        <div class="mk-id">
+          <b>${esc(f.name || '—')}</b> ${chip(FL_STATUS, f.status)} ${f.frozen_at ? '<span class="chip r">🔒</span>' : ''}
+          <div class="small muted"><span class="mono">0${esc(f.mobile || '')}</span> • ${esc([f.gov, f.region].filter(Boolean).join(' — ') || 'بدون منطقة')}${f.ref_code ? ` • كود <span class="mono">${esc(f.ref_code)}</span>` : ''}</div>
+        </div>
+        <div class="mk-acts">
+          <button class="btn sec sm" data-prof="${f.id}">الملف</button>
+          <button class="btn pri sm" data-open="${f.id}">👁️ خش بيه</button>
+        </div>
+      </div>`).join('') || '<div class="empty">مفيش شريك بالبحث ده</div>';
+    if (rows.length > slice.length) list.innerHTML += `<div class="small muted" style="text-align:center;margin-top:8px">+${rows.length - slice.length} كمان — ضيّق البحث</div>`;
+    $$('[data-open]', list).forEach((b) => b.onclick = () => openAs(b.dataset.open));
+    $$('[data-prof]', list).forEach((b) => b.onclick = () => openProfile(b.dataset.prof));
+  };
+  input.oninput = render; render(); if (!matchMedia('(max-width: 900px)').matches) input.focus();
 }
 
 // ------------------------------------------------------------------ partner profile (full page)

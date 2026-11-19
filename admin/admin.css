@@ -264,3 +264,12 @@ td .acts{display:flex;gap:4px;flex-wrap:wrap}
   .lv-row{grid-template-columns:52px minmax(0,1fr) 72px 46px 36px}
   .lv-row [data-chip],.lv-hd span:nth-child(5){display:none}
 }
+
+/* master key */
+.mk-row{display:flex;align-items:center;gap:12px;padding:10px 4px;border-top:1px solid var(--line,#e5e7eb)}
+.mk-row:first-child{border-top:0}
+.mk-av{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;background:linear-gradient(135deg,#1f9d55,#f08a24)}
+.mk-id{flex:1;min-width:0}
+.mk-id .small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk-acts{flex:none;display:flex;gap:6px}
+@media (max-width:600px){.mk-row{flex-wrap:wrap}.mk-acts{width:100%;justify-content:flex-end}}
