@@ -61,7 +61,8 @@ a{color:var(--g2)}
 .card{background:var(--card);border:1px solid var(--glass-bd);box-shadow:var(--sh);border-radius:var(--r);transition:box-shadow .25s,transform .25s,background-color .25s}
 .card.kpi{position:relative;overflow:hidden}
 .card.kpi:hover{transform:translateY(-2px);box-shadow:var(--sh-md);background:var(--card-hover)}
-.card.kpi::after{content:"";position:absolute;inset-inline-end:-30px;top:-30px;width:96px;height:96px;border-radius:50%;background:var(--g-soft);opacity:.7;pointer-events:none}
+.card.kpi::after{content:"";position:absolute;inset-inline-end:-22px;top:-22px;width:64px;height:64px;border-radius:50%;background:var(--g-soft);opacity:.6;pointer-events:none;transition:transform .35s}
+.card.kpi:hover::after{transform:scale(1.25)}
 .card.kpi.a::after{background:var(--amber-soft)} .card.kpi.b::after{background:var(--blue-soft)} .card.kpi.p::after{background:var(--purple-soft)}
 .kpi .lbl{letter-spacing:.02em;text-transform:none;font-size:12.5px}
 .kpi .val{font-variant-numeric:tabular-nums}
@@ -119,9 +120,9 @@ table.t tbody tr:hover td{background:var(--row-hover)}
 .co-logo{background:#fff;border:1px solid var(--line);border-radius:50%;overflow:hidden;color:var(--ink2);font-size:13px;box-shadow:none}
 .co-logo img{object-fit:cover}
 
-.side nav{display:flex;flex-direction:column;gap:3px;flex:1;overflow-y:auto;overflow-x:hidden;margin:12px 0;padding:0 2px}
-.side nav button{border:0;background:transparent;color:var(--ink2);text-align:start;padding:9px 12px;border-radius:13px;font-weight:700;cursor:pointer;display:flex;gap:10px;align-items:center;transition:background-color .2s,color .2s,transform .2s;width:100%;font-size:14px;-webkit-tap-highlight-color:transparent;position:relative}
-.side nav button .ico{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:var(--surface2);color:var(--mute);transition:all .2s}
+.side nav{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;overflow-x:hidden;margin:12px 0;padding:0 2px}
+.side nav button{border:0;background:transparent;color:var(--ink2);text-align:start;padding:6px 10px;border-radius:13px;font-weight:700;cursor:pointer;display:flex;gap:10px;align-items:center;transition:background-color .2s,color .2s,transform .2s;width:100%;font-size:14px;-webkit-tap-highlight-color:transparent;position:relative}
+.side nav button .ico{width:28px;height:28px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:var(--surface2);color:var(--mute);transition:all .2s}
 .side nav button .ico svg{width:17px;height:17px;display:block}
 .side nav button .lbl{flex:1;text-align:start}
 .side nav button:hover{background:var(--surface2);color:var(--ink)}
@@ -191,7 +192,16 @@ td .acts{display:flex;gap:4px;flex-wrap:wrap}
   .tb-hi{flex-basis:100%}
   .tb-clock{flex:1;min-width:0}
   .tb-time{font-size:18px}
+  .side .me{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding-top:10px}
+  .side .me #meEmail{flex:1 1 auto;min-width:0;font-size:12px}
+  .side .me #meRole{font-size:12px}
+  .side .me .row{margin-top:0!important;flex-basis:100%}
+  .push-ctl{flex-basis:100%;padding:8px 10px}
+  .push-ctl .pc-n{display:none}
+  .side nav button{padding:6px 10px}
+  .side nav{flex:none;align-items:flex-start}
 }
+table.t td b,table.t td .chip{white-space:nowrap}
 /* ---- Funnel & stale ---- */
 .funnel{display:flex;flex-direction:column;gap:8px}
 .fn-row{display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:10px;font-size:13px}

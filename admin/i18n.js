@@ -236,7 +236,7 @@ const DICT = {
   'تفعيل': 'Activate', 'خروج من الأجهزة': 'Sign out devices', 'آخر دخول': 'Last sign-in', 'تحكم': 'Control', 'إيقاف، باسوورد، أجهزة': 'Disable, password, devices',
   'بونص ورق بس': 'Papers bonus only', 'ليه أي بونص': 'Has any bonus', 'كل الشركاء': 'All partners', 'العواميد': 'Columns', 'الشريك المرشّح': 'Nominating partner',
   'اختار العواميد اللي تظهر': 'Choose the visible columns', 'افتح ملف الشريك': 'Open partner profile', 'نشر وظيفة': 'Post job', 'الوظيفة': 'Job',
-  'السحوبات هتتحول يوم الخميس': 'Payouts move to Thursday', 'من كام مندوب شغال': 'From how many working couriers',
+  'من كام مندوب شغال': 'From how many working couriers',
 
   // ---- install / iOS ----
   'على الآيفون: من زرار المشاركة اختار': 'On iPhone: from the Share button choose', 'إضافة إلى الشاشة الرئيسية': 'Add to Home Screen', 'وافتح لوحة الإدارة من هناك': 'and open the admin panel from there',
