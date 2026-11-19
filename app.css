@@ -778,3 +778,17 @@ body.join .blobs{position:fixed}
 .pk-item .link{min-height:32px;color:var(--red);font-size:12.5px}
 .push-card{background:linear-gradient(135deg,#eef8ff,var(--card))}
 .pk-login{margin-top:-4px}
+
+/* ---- Job suggestions, language switch ---- */
+.match{display:flex;flex-direction:column;gap:6px;background:linear-gradient(135deg,var(--g-soft),var(--card));border:1.5px solid var(--g-mid);border-radius:18px;padding:10px 12px;animation:rise .35s var(--spring) both}
+.match>b{font-size:13.5px;color:var(--g2)}
+.mrow{display:flex;gap:10px;align-items:center;text-align:start;border:0;background:var(--card);border-radius:14px;padding:8px 10px;cursor:pointer;font:inherit;color:inherit;box-shadow:var(--sh);transition:transform .25s var(--spring)}
+.mrow:active{transform:scale(.97)}
+.mrow .jlogo{width:38px;height:38px;font-size:12px}
+.mrow .grow{min-width:0}
+.mrow b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .grow span{display:block;font-size:11.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow em{font-style:normal;font-size:11.5px;font-weight:700;color:#a3400f;white-space:nowrap}
+.jn-lang{position:absolute;top:14px;inset-inline-end:max(16px,env(safe-area-inset-right));z-index:2;border:1px solid var(--line);background:var(--card);color:var(--ink2);border-radius:99px;padding:6px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--sh)}
+.jn-wrap{position:relative}
+html[dir="ltr"] .jn-jc,html[dir="ltr"] .jn-hero{text-align:left}

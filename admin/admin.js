@@ -3,6 +3,18 @@ import {
   sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, waLink, logoImg, toast, modal, confirmBox, promptBox, errMsg, busy,
   fetchAll, csvDownload, GOVS, VEHICLES, CAND_STATUS, WD_STATUS, FL_STATUS, chip,
 } from '../shared/common.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../shared/config.js';
+
+// Report uncaught admin errors to client_errors (max 5 per page load).
+let errSent = 0;
+function reportError(message, stack) {
+  message = String(message || '');
+  if (errSent >= 5 || !message || /ResizeObserver|Script error/i.test(message)) return;
+  errSent++;
+  sb.rpc('log_client_error', { p: { app: 'admin', message: message.slice(0, 500), stack: String(stack || '').slice(0, 2000), url: location.pathname, ua: navigator.userAgent } }).then(() => {}, () => {});
+}
+addEventListener('error', (e) => reportError(e.message, e.error?.stack));
+addEventListener('unhandledrejection', (e) => reportError(e.reason?.message || e.reason, e.reason?.stack));
 
 const ROLE_PERMS = {
   owner: ['view', 'partners', 'couriers', 'withdrawals', 'companies', 'jobs', 'audit', 'staff'],
@@ -20,12 +32,13 @@ const ICONS = {
   staff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3.5"/><path d="M2 21c0-3.6 2.7-6.5 7-6.5h2"/><circle cx="18.5" cy="16.5" r="3"/><path d="M15.8 13.8l1 1M21.2 19.2l1 1M13 16.5h1.5M22 16.5h1.5M15.8 19.2l1-1M21.2 13.8l1-1"/></svg>`,
   audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 01-12.6 7.4L3 20l1.2-4.2A8.5 8.5 0 1121 11.5z"/><path d="M8 10h8M8 13.5h5"/></svg>`,
+  errors: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4.5"/><circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none"/></svg>`,
   fraud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
 };
 const NAV = [
   ['dash', 'لوحة المؤشرات', 'view'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
   ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
-  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['audit', 'سجل التغييرات', 'audit'],
+  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['errors', 'الأخطاء', 'audit'], ['audit', 'سجل التغييرات', 'audit'],
 ];
 const S = { me: null, view: 'dash', companies: [], fl: [], flMap: new Map(), poll: null, courSt: '' };
 const can = (p) => (ROLE_PERMS[S.me?.role] ?? []).includes(p);
@@ -69,6 +82,7 @@ async function boot() {
   $('#nav').innerHTML = NAV.filter((n) => can(n[2])).map((n) => `<button data-go="${n[0]}"><span class="ico">${ICONS[n[0]] || ''}</span><span class="lbl">${n[1]}</span><span class="badge hidden" data-badge="${n[0]}"></span></button>`).join('');
   $$('#nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
   show('app');
+  renderPushCtl();
   await loadBase();
   go(S.view);
 }
@@ -83,6 +97,56 @@ async function loadBase() {
   const pend = f.filter((x) => x.status === 'Pending' && !x.duplicate_of).length;
   const bp = $('[data-badge=partners]'); if (bp) { bp.textContent = pend || ''; bp.classList.toggle('hidden', !pend); }
   await chatBadge();
+  await errorsBadge();
+}
+async function errorsBadge() {
+  const be = $('[data-badge=errors]'); if (!be || !can('audit')) return;
+  const { count } = await sb.from('client_errors').select('*', { count: 'exact', head: true }).gte('at', new Date(Date.now() - 86400000).toISOString());
+  be.textContent = count || ''; be.classList.toggle('hidden', !count);
+}
+
+// ------------------------------------------------------------------ daily report push (staff)
+const pushOk = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIOSDev = /iphone|ipad|ipod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const b64u8 = (b) => { const pad = '='.repeat((4 - (b.length % 4)) % 4), r = atob((b + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
+async function swReg() { return (await navigator.serviceWorker.getRegistration('/')) || navigator.serviceWorker.register('/sw.js', { scope: '/' }); }
+async function staffSub() { if (!pushOk()) return null; const reg = await navigator.serviceWorker.getRegistration('/'); return reg ? reg.pushManager.getSubscription() : null; }
+async function renderPushCtl() {
+  const host = $('#pushCtl'); if (!host || !can('view')) return;
+  const sub = await staffSub().catch(() => null);
+  const st = !pushOk() ? (isIOSDev && !isStandalone() ? 'ضيف الموقع للشاشة الرئيسية الأول (آيفون)' : 'المتصفح ده مش بيدعم الإشعارات')
+    : Notification.permission === 'denied' ? 'مقفول من المتصفح' : sub ? 'مفعّل ✓' : 'مش مفعّل';
+  const canToggle = pushOk() && Notification.permission !== 'denied';
+  host.innerHTML = `<div class="pc-t">🔔 التقرير اليومي على الموبايل</div>
+    <div class="pc-s">${esc(st)}</div>
+    ${canToggle ? `<button class="btn sec sm block" data-pc>${sub ? 'إيقاف' : 'فعّل'}</button>` : ''}
+    <div class="pc-n">بيوصلك كل يوم حوالي الساعة 9 الصبح${isIOSDev ? ' — على الآيفون لازم الموقع يكون متضاف للشاشة الرئيسية' : ''}.</div>`;
+  const b = $('[data-pc]', host); if (!b) return;
+  b.onclick = () => busy(b, async () => {
+    try {
+      if (sub) {
+        await sb.rpc('remove_staff_push', { p_endpoint: sub.endpoint });
+        await sub.unsubscribe().catch(() => {});
+        toast('التقرير اليومي اتقفل');
+      } else {
+        if (isIOSDev && !isStandalone()) throw new Error('ios');
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') throw new Error('denied');
+        const reg = await swReg(); await navigator.serviceWorker.ready;
+        const { publicKey } = await fetch(`${SUPABASE_URL}/functions/v1/push`, { headers: { apikey: SUPABASE_ANON_KEY } }).then((r) => r.json());
+        const ns = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(publicKey) });
+        const j = ns.toJSON();
+        const { error } = await sb.rpc('save_staff_push', { p: { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth } });
+        if (error) throw error;
+        toast('التقرير اليومي اتفعّل 🔔 هيوصلك كل يوم الصبح', 'ok');
+      }
+    } catch (e) {
+      toast(e.message === 'ios' ? 'على الآيفون: من زرار المشاركة اختار "إضافة إلى الشاشة الرئيسية" وافتح لوحة الإدارة من هناك.'
+        : e.message === 'denied' ? 'الإشعارات مقفولة — افتحها من إعدادات المتصفح.' : errMsg(e), 'bad');
+    }
+    renderPushCtl();
+  });
 }
 async function chatBadge() {
   const bc = $('[data-badge=chat]'); if (!bc || !can('partners')) return;
@@ -94,7 +158,7 @@ function go(v) {
   if (S.poll) { clearInterval(S.poll); S.poll = null; }
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
   loading();
-  ({ dash, partners, couriers, withdrawals, chat, companies, jobs, fraud, staff, audit })[v]().catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
+  ({ dash, partners, couriers, withdrawals, chat, companies, jobs, fraud, staff, errors, audit })[v]().catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
 }
 
 // generic paged table renderer
@@ -152,7 +216,9 @@ async function dash() {
       <div class="card"><h3>أعلى الشركاء أرباحاً</h3>${topFl.map(({ f, e }) => `<div class="hbar"><span class="l">${esc(f.name)}</span><span class="b"><i style="width:${e / maxF * 100}%;background:var(--amber)"></i></span><span class="n">${Math.round(e)}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
     </div>
     ${funnelHtml(cands)}
-    ${staleHtml(cands)}`);
+    ${staleHtml(cands)}
+    <div id="usageCard"></div>`);
+  usageCard().catch(() => {});
   $$('[data-stale]').forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.stale)]));
   const sa = $('[data-stale-all]'); if (sa) sa.onclick = () => { S.courSt = 'submitted'; go('couriers'); };
 }
@@ -993,6 +1059,52 @@ async function staff() {
       });
     };
   };
+}
+
+// ------------------------------------------------------------------ usage (aggregated counters, no personal data)
+const EV_AR = {
+  'app:open': 'فتح التطبيق', 'view:home': 'فتح صفحة الرئيسية', 'view:jobs': 'فتح صفحة الوظايف', 'view:couriers': 'فتح صفحة مناديبي',
+  'view:wallet': 'فتح صفحة المحفظة', 'view:me': 'فتح صفحة حسابي', 'view:chat': 'فتح صفحة المحادثة', nominate: 'ترشيحات',
+  'nominate:offline': 'ترشيحات من غير نت', 'share:story': 'صور ستوري', 'share:text': 'مشاركة نص', 'wa:template': 'رسايل واتساب جاهزة',
+  'match:pick': 'اختيار من الوظايف المقترحة', 'wd:request': 'طلبات سحب', 'join:view': 'فتح صفحة التسجيل', 'join:submit': 'تسجيل مندوب من لينك',
+  'push:on': 'تفعيل إشعارات', 'passkey:on': 'تفعيل بصمة', 'passkey:login': 'دخول بالبصمة',
+};
+async function usageCard() {
+  const host = $('#usageCard'); if (!host || !can('view')) return;
+  const days = [...Array(14)].map((_, i) => { const d = new Date(Date.now() - (13 - i) * 86400000); return d.toISOString().slice(0, 10); });
+  const { data, error } = await sb.from('usage_daily').select('day,event,n').gte('day', days[0]).order('day');
+  if (error || !host.isConnected) return;
+  const rows = data || [];
+  const opens = days.map((d) => ({ d, n: rows.filter((r) => r.day === d && r.event === 'app:open').reduce((s, r) => s + r.n, 0) }));
+  const maxO = Math.max(1, ...opens.map((o) => o.n));
+  const tot = {}; rows.forEach((r) => { tot[r.event] = (tot[r.event] || 0) + r.n; });
+  const top = Object.entries(tot).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  host.innerHTML = `<div class="card usage" style="margin-top:12px">
+    <h3>📈 استخدام التطبيق — آخر 14 يوم</h3>
+    <div class="u-sub small muted">أجهزة فتحت التطبيق كل يوم</div>
+    <div class="u-bars" role="img" aria-label="أجهزة فتحت التطبيق يومياً">${opens.map((o) => `<div class="u-col" title="${o.d}: ${o.n}"><span class="u-v">${o.n || ''}</span><i style="height:${Math.round(o.n / maxO * 100)}%"></i><span class="u-d">${o.d.slice(8)}</span></div>`).join('')}</div>
+    ${top.length ? `<div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>الحدث</th><th>العدد (14 يوم)</th></tr></thead><tbody>
+      ${top.map(([e, n]) => `<tr><td>${esc(EV_AR[e] || e)}</td><td class="bold">${n.toLocaleString('en-US')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لسه مفيش بيانات استخدام</div>'}
+    <p class="small muted" style="margin:10px 0 0">أرقام مجمّعة بدون أي بيانات شخصية</p></div>`;
+}
+
+// ------------------------------------------------------------------ client errors
+async function errors() {
+  const { data, error } = await sb.from('client_errors').select('id,at,app,message,stack,url,ua').order('at', { ascending: false }).limit(200);
+  if (error) throw error;
+  const groups = new Map();
+  (data || []).forEach((e) => { const k = e.app + '|' + e.message; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); });
+  const APP = { app: 'تطبيق الشركاء', admin: 'لوحة الإدارة', join: 'صفحة التسجيل' };
+  const day = (data || []).filter((e) => Date.now() - new Date(e.at) < 86400000).length;
+  view(`<div class="ph"><h1>الأخطاء</h1><span class="small muted">آخر 200 خطأ • ${day} في آخر 24 ساعة</span></div>
+    ${groups.size ? `<div class="stack">${[...groups.values()].map((g) => {
+      const last = g[0];
+      return `<details class="card err-g"><summary><span class="chip n">${esc(APP[last.app] || last.app)}</span><b class="err-m">${esc(last.message)}</b>
+        <span class="small muted">${g.length} مرة • آخر مرة ${new Date(last.at).toLocaleString('en-GB')}</span></summary>
+        ${last.stack ? `<pre class="err-s">${esc(last.stack)}</pre>` : ''}
+        <div class="small muted">${g.slice(0, 5).map((e) => `<div class="mono">${esc(e.url || '')} — ${esc((e.ua || '').slice(0, 120))}</div>`).join('')}</div></details>`;
+    }).join('')}</div>` : '<div class="card empty">مفيش أخطاء 🎉</div>'}`);
+  errorsBadge();
 }
 
 // ------------------------------------------------------------------ audit

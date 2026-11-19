@@ -1,5 +1,5 @@
 // Network-first so every deploy shows up immediately; the cache only serves when offline.
-const CACHE = 'fsp-v2';
+const CACHE = 'fsp-v3';
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/shared/common.css', '/shared/common.js', '/shared/config.js', '/brand/fs-mark.png', '/brand/fs-logo.png'];
 
 self.addEventListener('install', (e) => {
@@ -23,14 +23,16 @@ self.addEventListener('push', (e) => {
   try { d = e.data ? e.data.json() : {}; } catch { d = { title: e.data && e.data.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || 'Full Speed', {
     body: d.body || '', tag: d.tag, icon: '/brand/fs-icon-192.png', badge: '/brand/fs-icon-192.png',
-    dir: 'rtl', lang: 'ar', data: { link: d.link || '' },
+    dir: 'rtl', lang: 'ar', data: { link: d.link || '', url: d.url || '' },
   }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = '/?go=' + encodeURIComponent(e.notification.data?.link || 'home');
+  const dest = e.notification.data?.url || '/?go=' + encodeURIComponent(e.notification.data?.link || 'home');
+  const admin = dest.startsWith('/admin');
+  const url = dest;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
-    const c = cs.find((x) => new URL(x.url).origin === location.origin && !x.url.includes('/admin'));
+    const c = cs.find((x) => new URL(x.url).origin === location.origin && x.url.includes('/admin') === admin);
     if (c) { c.navigate(url).catch(() => {}); return c.focus(); }
     return self.clients.openWindow(url);
   }));

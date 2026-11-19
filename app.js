@@ -28,6 +28,16 @@ function applyTheme(v) {
 applyTheme(store.get('fsf-theme', ''));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(store.get('fsf-theme', '')));
 
+// Privacy-friendly usage counters (aggregated per day, no user ids) and client error reports.
+const track = (ev) => { sb.rpc('track_event', { p_event: ev }).then(() => {}, () => {}); };
+let errCount = 0;
+function reportError(message, stack) {
+  if (errCount++ >= 5 || !message || /ResizeObserver|Script error/i.test(message)) return;
+  sb.rpc('log_client_error', { p: { app: 'partner', message: String(message).slice(0, 500), stack: String(stack || '').slice(0, 2000), url: location.pathname + '#' + S.view, ua: navigator.userAgent } }).then(() => {}, () => {});
+}
+addEventListener('error', (e) => reportError(e.message, e.error?.stack));
+addEventListener('unhandledrejection', (e) => reportError(e.reason?.message || String(e.reason), e.reason?.stack));
+
 // Hide the floating dock while the on-screen keyboard is up.
 const isTextField = (el) => el?.matches?.('input:not([type=radio]):not([type=checkbox]),select,textarea');
 document.addEventListener('focusin', (e) => { if (isTextField(e.target)) document.body.classList.add('kb'); });
@@ -300,6 +310,7 @@ async function registerPasskey() {
   const response = await startRegistration({ optionsJSON: options });
   await pkCall('register-verify', { cid, response, device: deviceName() }, true);
   store.set(ukey('pk-offer'), 1);
+  track('passkey:on');
 }
 async function loginWithPasskey(btn) {
   const old = btn.innerHTML; btn.disabled = true; btn.textContent = 'بنستنى البصمة...';
@@ -310,7 +321,7 @@ async function loginWithPasskey(btn) {
     const { token_hash } = await pkCall('login-verify', { cid, response });
     const { error } = await sb.auth.verifyOtp({ token_hash, type: 'magiclink' });
     if (error) throw error;
-    buzz(20); await boot();
+    track('passkey:login'); buzz(20); await boot();
   } catch (e) {
     if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') return;
     toast(e?.message === 'unknown_passkey' ? 'البصمة دي مش متسجلة — ادخل بكلمة المرور وفعّلها من "حسابي".' : 'مقدرناش ندخلك بالبصمة، ادخل بكلمة المرور.', 'bad');
@@ -346,6 +357,7 @@ async function enablePush() {
   const j = sub.toJSON();
   const { error } = await sb.rpc('save_push_subscription', { p: { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, ua: navigator.userAgent.slice(0, 200) } });
   if (error) throw error;
+  track('push:on');
 }
 async function disablePush() {
   const sub = await currentPushSub(); if (!sub) return;
@@ -403,6 +415,8 @@ async function boot() {
   ]);
   S.companies = c.data ?? []; S.rules = r.data ?? [];
   S.jobs = S.cands = S.ledger = null;
+  if (store.get('fsf-open-day', '') !== today()) { store.set('fsf-open-day', today()); track('app:open'); }
+  setTimeout(flushQueue, 1500);
   const want = new URLSearchParams(location.search).get('go');
   if (['home', 'jobs', 'couriers', 'wallet', 'me', 'chat'].includes(want)) { S.view = want; history.replaceState(null, '', location.pathname); }
   go(S.view);
@@ -431,6 +445,7 @@ function go(v) {
   $$('.dock [data-go]').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
   $('#chatBtn').classList.toggle('on', v === 'chat');
   window.scrollTo(0, 0);
+  track('view:' + v);
   ({ home, jobs, couriers, wallet, me, chat })[v]();
 }
 
@@ -523,6 +538,29 @@ async function refSheet() {
       else { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = file.name; a.click(); }
     }, 'image/png');
   };
+}
+
+// ------------------------------------------------------------------ ready-made WhatsApp messages
+function waSheet(c) {
+  if (!c) return;
+  const first = String(c.name || '').trim().split(/\s+/)[0] || '';
+  const co = compName(c), job = S.jobs?.find((j) => String(j.id) === String(c.job_id));
+  const tgt = targetDays(c.company_id), started = !!c.start_date;
+  const d = started ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : 0;
+  const docs = (job?.docs || '').trim() || '• صورة البطاقة (وش وضهر)\n• رخصة القيادة\n• فيش جنائي';
+  const T = [
+    ['📄', 'الورق المطلوب', `أهلاً ${first} 👋\nعشان نكمّل تعيينك في ${co} محتاجين الورق ده:\n${docs}\n\nابعتهولي صور هنا وأنا أرفعهم على طول.`],
+    ['📅', 'تذكير بالمقابلة', `أهلاً ${first} 👋\nبفكّرك بمقابلة ${co} إن شاء الله. لو محتاج العنوان أو أي تفاصيل كلّمني.`],
+    started && d < tgt ? ['💪', 'كمّل الأيام', `برافو يا ${first} 👏 كمّلت ${d} يوم مع ${co}!\nفاضل ${tgt - d} يوم بس وتكمّل الشهر — كمّل كده 💪`] : null,
+    c.status === 'hired' ? ['🎉', 'مبروك التعيين', `مبروك يا ${first} 🎉 اتعيّنت في ${co}!\nربنا يوفقك، ولو احتجت أي حاجة أنا موجود.`] : null,
+    ['✍️', 'رسالة فاضية', ''],
+  ].filter(Boolean);
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:#16a34a">💬</div><div><h2>رسالة لـ ${esc(c.name)}</h2><p>اختار رسالة جاهزة وهتفتح على واتساب — تقدر تعدّلها قبل ما تبعت</p></div></div>
+    <div class="share-opts">${T.map(([ic, t, msg], k) => `<button class="share-opt" data-t="${k}"><span>${ic}</span><b>${t}</b><em>${esc(msg.split('\n')[0] || 'افتح المحادثة من غير رسالة')}</em></button>`).join('')}</div>`);
+  $$('[data-t]', m.el).forEach((b) => b.onclick = () => {
+    const msg = T[Number(b.dataset.t)][2]; track('wa:template'); m.close();
+    window.open(waLink(c.mobile) + (msg ? '?text=' + encodeURIComponent(msg) : ''), '_blank', 'noopener');
+  });
 }
 
 // ------------------------------------------------------------------ courier documents
@@ -984,10 +1022,10 @@ function shareSheet(j) {
       <button class="share-opt" data-s="img"><span>🖼️</span><b>صورة للستوري</b><em>صورة جاهزة بتصميم Full Speed لستوري واتساب وفيسبوك</em></button>
       <button class="share-opt" data-s="txt"><span>💬</span><b>رسالة نصية</b><em>تفاصيل الوظيفة كرسالة على واتساب</em></button>
     </div>`);
-  $('[data-s=txt]', m.el).onclick = () => { m.close(); shareJob(j); };
+  $('[data-s=txt]', m.el).onclick = () => { m.close(); track('share:text'); shareJob(j); };
   $('[data-s=img]', m.el).onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true; $('b', b).textContent = 'بنجهّز الصورة...';
-    try { const blob = await storyImage(j); m.close(); previewStory(blob, j); } catch { toast('مقدرناش نعمل الصورة، جرّب تاني', 'bad'); b.disabled = false; }
+    try { const blob = await storyImage(j); m.close(); previewStory(blob, j); track('share:story'); } catch { toast('مقدرناش نعمل الصورة، جرّب تاني', 'bad'); b.disabled = false; }
   };
 }
 const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
@@ -1064,7 +1102,43 @@ function shareJob(j) {
 }
 
 // ------------------------------------------------------------------ add courier
-function addCourier(job) {
+// ------------------------------------------------------------------ job suggestions for a courier
+const normAr = (t) => String(t || '').replace(/[أإآ]/g, 'ا').replace(/ة(?=\s|$)/g, 'ه').replace(/ى(?=\s|$)/g, 'ي').replace(/\s+/g, ' ').trim();
+function matchJobs(gov, region, vehicle) {
+  const g = normAr(gov), r = normAr(region), words = r.split(' ').filter((w) => w.length > 2);
+  return (S.jobs || []).map((j) => {
+    let sc = 0;
+    if (vehicle && j.vehicle === vehicle) sc += 3;
+    if (g && normAr(j.gov) === g) sc += 3;
+    const jr = normAr(j.region);
+    if (r && jr && (jr.includes(r) || r.includes(jr))) sc += 3; else if (words.some((w) => jr.includes(w))) sc += 1.5;
+    sc += Math.min(1.5, ladderOf(j.company_id).max / 1000);
+    return { j, sc };
+  }).filter((x) => x.sc >= 4).sort((a, b) => b.sc - a.sc).slice(0, 3).map((x) => x.j);
+}
+
+// ------------------------------------------------------------------ offline nomination queue
+const queueKey = () => ukey('queue');
+const isNetErr = (e) => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(String(e?.message || e));
+async function flushQueue() {
+  const q = store.get(queueKey(), []);
+  if (!q.length || !navigator.onLine) return;
+  let ok = 0; const left = [], failed = [];
+  for (const item of q) {
+    try {
+      const { error } = await sb.rpc('submit_candidate', { p: item.p });
+      if (!error) ok++;
+      else if (isNetErr(error)) left.push(item);
+      else failed.push(`${item.p.name}: ${errMsg(error)}`);
+    } catch (e) { if (isNetErr(e)) left.push(item); else failed.push(`${item.p.name}: ${errMsg(e)}`); }
+  }
+  store.set(queueKey(), left);
+  if (ok) { toast(`اتبعت ${ok} ترشيح كانوا مستنيين النت ✅`, 'ok'); S.cands = null; if (S.view === 'couriers' || S.view === 'home') go(S.view); }
+  if (failed.length) toast('ترشيحات مااتبعتش: ' + failed.join(' · '), 'bad');
+}
+addEventListener('online', () => setTimeout(flushQueue, 800));
+
+function addCourier(job, pre = {}) {
   buzz(10);
   const comps = S.companies.filter((c) => c.active);
   const vSel = VEHICLES.includes(job?.vehicle) ? job.vehicle : VEHICLES[0];
@@ -1073,20 +1147,40 @@ function addCourier(job) {
       <div><h2>رشّح مندوب</h2><p>${job ? `${esc(job.title)} · ${esc(job.company)}` : 'كل ترشيح ممكن يتحوّل لبونص 💸'}</p></div></div>
     <form class="stack">
       <div class="grid2">
-        <div><label class="f">اسم المندوب</label><input class="in" name="name" required maxlength="120"></div>
-        <div><label class="f">موبايل المندوب</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx"><div class="mob-hint" aria-live="polite"></div></div>
+        <div><label class="f">اسم المندوب</label><input class="in" name="name" required maxlength="120" value="${esc(pre.name || '')}"></div>
+        <div><label class="f">موبايل المندوب</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx" value="${esc(pre.mobile || '')}"><div class="mob-hint" aria-live="polite"></div></div>
       </div>
       ${job ? '' : `<div><label class="f">الشركة</label><select class="in" name="company" required><option value="">اختار...</option>${comps.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></div>`}
       <div><label class="f">نوع المركبة</label><div class="vgrid">${VEHICLES.map((v) => `<label class="vopt"><input type="radio" name="vehicle" value="${esc(v)}" ${v === vSel ? 'checked' : ''}><span><em>${VEH_EMOJI[v] || '🚚'}</em>${esc(v)}</span></label>`).join('')}</div></div>
       <div class="grid2">
-        <div><label class="f">المحافظة</label><select class="in" name="gov" required>${GOVS.map((g) => `<option ${job?.gov === g ? 'selected' : ''}>${g}</option>`).join('')}</select></div>
-        <div><label class="f">المنطقة</label><input class="in" name="region" required value="${esc(job?.region || '')}"></div>
+        <div><label class="f">المحافظة</label><select class="in" name="gov" required>${GOVS.map((g) => `<option ${(job?.gov || pre.gov) === g ? 'selected' : ''}>${g}</option>`).join('')}</select></div>
+        <div><label class="f">المنطقة</label><input class="in" name="region" required value="${esc(job?.region || pre.region || '')}"></div>
       </div>
+      ${job ? '' : '<div class="match" hidden></div>'}
       <div class="err" data-err></div>
       <div class="sheet-actions"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri grow">إرسال الترشيح ${IC.send}</button></div>
     </form>`);
   const f = $('form', m.el);
   const hint = $('.mob-hint', f), sendBtn = $('button.pri', f);
+  const matchBox = $('.match', f);
+  if (matchBox) {
+    const showMatches = async () => {
+      if (!S.jobs) await loadJobs();
+      const list = matchJobs(f.gov.value, f.region.value, f.vehicle.value);
+      matchBox.hidden = !list.length;
+      matchBox.innerHTML = list.length ? `<b>✨ أنسب وظايف للمندوب ده</b>${list.map((j) => { const mx = ladderOf(j.company_id).max; return `<button type="button" class="mrow" data-pick="${esc(j.id)}">${jobLogo(j)}<span class="grow"><b>${esc(j.title)}</b><span>${esc(j.company)} · ${esc(j.region || j.gov || '')}${j.vehicle ? ' · ' + (VEH_EMOJI[j.vehicle] || '') : ''}</span></span>${mx ? `<em>🎁 ${money(mx)}</em>` : ''}</button>`; }).join('')}` : '';
+      $$('[data-pick]', matchBox).forEach((b) => b.onclick = () => {
+        const pj = findJob(b.dataset.pick); track('match:pick');
+        m.close(); addCourier(pj, { name: f.name.value, mobile: f.mobile.value, region: f.region.value });
+      });
+    };
+    let mt = null;
+    const later = () => { clearTimeout(mt); mt = setTimeout(showMatches, 300); };
+    f.gov.addEventListener('change', later); f.region.addEventListener('input', later);
+    $$('input[name=vehicle]', f).forEach((r) => r.addEventListener('change', later));
+    if (pre.region || pre.gov) later();
+  }
+  if (pre.mobile) setTimeout(() => f.mobile.dispatchEvent(new Event('input')), 50);
   let dupT = null, dupFor = '';
   f.mobile.oninput = () => {
     clearTimeout(dupT);
@@ -1107,13 +1201,20 @@ function addCourier(job) {
     e.preventDefault();
     const mob = normMobile(f.mobile.value);
     if (!/^1[0125]\d{8}$/.test(mob)) { $('[data-err]', f).textContent = 'رقم موبايل المندوب غير صحيح.'; return; }
+    const payload = { name: f.name.value, mobile: f.mobile.value, gov: f.gov.value, region: f.region.value, vehicle: f.vehicle.value,
+      job_id: job?.id ?? null, company_id: job ? null : f.company.value };
+    const queueIt = () => {
+      store.set(queueKey(), [...store.get(queueKey(), []), { p: payload, at: Date.now() }]);
+      m.close(); buzz(20); track('nominate:offline');
+      toast('مفيش نت دلوقتي 📶 الترشيح اتحفظ وهيتبعت لوحده أول ما النت يرجع', 'ok');
+    };
+    if (!navigator.onLine) return queueIt();
     await busy($('button.pri', f), async () => {
-      const { error } = await sb.rpc('submit_candidate', { p: {
-        name: f.name.value, mobile: f.mobile.value, gov: f.gov.value, region: f.region.value, vehicle: f.vehicle.value,
-        job_id: job?.id ?? null, company_id: job ? null : f.company.value,
-      } });
+      let error;
+      try { ({ error } = await sb.rpc('submit_candidate', { p: payload })); } catch (e) { error = e; }
+      if (error && isNetErr(error)) return queueIt();
       if (error) { $('[data-err]', f).textContent = errMsg(error); return; }
-      m.close(); confetti(); buzz(30);
+      m.close(); confetti(); buzz(30); track('nominate');
       toast('تم إرسال الترشيح 🎉 هيظهر في "مناديبي"', 'ok');
       S.cands = null; S.jobs = null; S.cStatus = '';
       go('couriers');
@@ -1136,6 +1237,7 @@ async function couriers() {
     ${S.cands.length ? `
       <label class="search">${IC.search}<input placeholder="ابحث بالاسم أو الموبايل" data-q></label>
       <div class="pills" data-f="st"><button class="pill ${!st.st ? 'on' : ''}" data-v="">الكل <em>${S.cands.length}</em></button>${Object.entries(CAND_STATUS).map(([k, [t]]) => `<button class="pill ${st.st === k ? 'on' : ''}" data-v="${k}">${t} <em>${counts[k] || 0}</em></button>`).join('')}</div>` : ''}
+    ${store.get(queueKey(), []).length ? `<div class="cc-alert" style="margin-top:12px">📶 فيه ${store.get(queueKey(), []).length} ترشيح مستني النت عشان يتبعت — هيتبعت لوحده</div>` : ''}
     <div class="list" id="cList"></div>`);
   $('[data-add]').onclick = () => addCourier();
   const render = () => {
@@ -1147,6 +1249,7 @@ async function couriers() {
       : list.length ? list.map((c, i) => candCard(c, earnedBy[c.id] || 0, i)).join('') : empty('🔍', 'مفيش نتايج', 'جرّب حالة تانية أو امسح البحث.');
     const cta = $('[data-empty-cta]', box); if (cta) cta.onclick = () => addCourier();
     $$('[data-docs]', box).forEach((b) => b.onclick = () => docsSheet(S.cands.find((c) => c.id === b.dataset.docs)));
+    $$('[data-wa]', box).forEach((b) => b.onclick = () => waSheet(S.cands.find((c) => c.id === b.dataset.wa)));
     animateIn(box);
   };
   if (S.cands.length) {
@@ -1187,7 +1290,7 @@ function candCard(c, earned, i) {
       <span>الورق: <b>${c.paper_date ? fmtDate(c.paper_date) : '—'}</b></span>
       <span class="earn">أرباحك منه<b>${money(earned)}</b></span>
       ${c.status !== 'rejected' ? `<button class="ibtn docs-btn" data-docs="${esc(c.id)}" aria-label="ورق ${esc(c.name)}">📎</button>` : ''}
-      <a class="ibtn wa" href="${waLink(c.mobile)}" target="_blank" rel="noopener" aria-label="كلّم المندوب واتساب">${IC.chat}</a>
+      <button class="ibtn wa" data-wa="${esc(c.id)}" aria-label="رسالة واتساب لـ ${esc(c.name)}">${IC.chat}</button>
     </div>
     ${c.source === 'self' ? '<div class="cc-src">🔗 سجّل من لينكك</div>' : ''}
   </article>`;
@@ -1323,7 +1426,7 @@ function requestWd(max) {
     await busy($('button.pri', f), async () => {
       const { error } = await sb.rpc('request_withdrawal', { p_amount: Number(f.amount.value), p_method: f.method.value, p_details: f.details.value });
       if (error) { $('[data-err]', f).textContent = errMsg(error); return; }
-      m.close(); confetti(); buzz(30);
+      m.close(); confetti(); buzz(30); track('wd:request');
       toast('تم إرسال طلب السحب 🎉', 'ok');
       S.walletTab = 'wd'; wallet();
     });

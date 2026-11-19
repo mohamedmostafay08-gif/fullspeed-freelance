@@ -6,8 +6,12 @@ import {
 import { isoBase64URL } from 'npm:@simplewebauthn/server@13.1.1/helpers';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const RP_ID = 'fullspeed-freelance.pages.dev';
-const ORIGINS = ['https://fullspeed-freelance.pages.dev'];
+// Each site origin gets its own relying-party id (passkeys are bound to the domain they were made on).
+const RP: Record<string, string> = {
+  'https://fullspeed-freelance.pages.dev': 'fullspeed-freelance.pages.dev',
+  'https://freelance.fullspeedlogistics.com': 'freelance.fullspeedlogistics.com',
+};
+const ORIGINS = Object.keys(RP);
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 
 function cors(origin: string) {
@@ -41,7 +45,10 @@ async function takeChallenge(id: string, userId: string | null) {
 }
 
 Deno.serve(async (req) => {
-  const h = cors(req.headers.get('origin') ?? '');
+  const origin = req.headers.get('origin') ?? '';
+  const h = cors(origin);
+  const RP_ID = RP[origin];
+  if (req.method !== 'OPTIONS' && !RP_ID) return new Response(JSON.stringify({ error: 'origin' }), { status: 403, headers: h });
   const reply = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: h });
   if (req.method === 'OPTIONS') return new Response('ok', { headers: h });
   if (req.method !== 'POST') return reply({ error: 'method' }, 405);
@@ -69,7 +76,7 @@ Deno.serve(async (req) => {
         const expectedChallenge = await takeChallenge(String(body.cid), user.id);
         if (!expectedChallenge) return reply({ error: 'expired' }, 400);
         const v = await verifyRegistrationResponse({
-          response: body.response, expectedChallenge, expectedOrigin: ORIGINS, expectedRPID: RP_ID, requireUserVerification: true,
+          response: body.response, expectedChallenge, expectedOrigin: origin, expectedRPID: RP_ID, requireUserVerification: true,
         });
         if (!v.verified || !v.registrationInfo) return reply({ error: 'not_verified' }, 400);
         const c = v.registrationInfo.credential;
@@ -90,7 +97,7 @@ Deno.serve(async (req) => {
         const { data: pk } = await sb.from('passkeys').select('id,user_id,public_key,counter,transports').eq('id', String(body.response?.id ?? '')).maybeSingle();
         if (!pk) return reply({ error: 'unknown_passkey' }, 400);
         const v = await verifyAuthenticationResponse({
-          response: body.response, expectedChallenge, expectedOrigin: ORIGINS, expectedRPID: RP_ID, requireUserVerification: true,
+          response: body.response, expectedChallenge, expectedOrigin: origin, expectedRPID: RP_ID, requireUserVerification: true,
           credential: { id: pk.id, publicKey: isoBase64URL.toBuffer(pk.public_key), counter: Number(pk.counter), transports: pk.transports ?? undefined },
         });
         if (!v.verified) return reply({ error: 'not_verified' }, 400);
