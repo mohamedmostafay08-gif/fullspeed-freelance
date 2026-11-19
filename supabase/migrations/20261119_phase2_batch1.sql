@@ -1,6 +1,6 @@
 -- Phase 2 / batch 1: additive only (no drops, no data deletes).
 -- duplicate check, in-app notifications, partner<->admin chat, courier documents,
--- company logo uploads, partnership terms, referral links + public join page, fraud signals.
+-- company logo uploads, referral links + public join page, fraud signals.
 
 -- ---------------------------------------------------------------- 1. instant duplicate check
 create or replace function public.check_courier_mobile(p_mobile text)
@@ -179,17 +179,6 @@ create policy logos_insert on storage.objects for insert to authenticated with c
 drop policy if exists logos_update on storage.objects;
 create policy logos_update on storage.objects for update to authenticated using (bucket_id = 'company-logos' and public.has_perm('companies'));
 
--- ---------------------------------------------------------------- 5. partnership terms
-alter table public.freelancers add column if not exists terms_version text, add column if not exists terms_accepted_at timestamptz;
-create or replace function public.accept_terms(p_version text)
-returns void language plpgsql security definer set search_path = public as $$
-begin
-  if public.my_freelancer_id() is null then raise exception 'not_freelancer'; end if;
-  update public.freelancers set terms_version = left(p_version, 20), terms_accepted_at = now() where id = public.my_freelancer_id();
-end $$;
-revoke all on function public.accept_terms(text) from public, anon;
-grant execute on function public.accept_terms(text) to authenticated;
-
 -- ---------------------------------------------------------------- 6. referral links + public join page
 alter table public.freelancers add column if not exists ref_code text;
 update public.freelancers set ref_code = lower(substr(md5(id::text || clock_timestamp()::text), 1, 7)) where ref_code is null;
@@ -240,10 +229,12 @@ begin
   return 'ok';
 end $$;
 revoke all on function public.public_ref_info(text) from public;
-revoke all on function public.public_join(text, jsonb) from public;
-grant execute on function public.public_ref_info(text), public.public_join(text, jsonb) to anon, authenticated;
+grant execute on function public.public_ref_info(text) to anon, authenticated;
+-- public_join is only callable by the `join` edge function (service role), which checks Cloudflare Turnstile first.
+revoke all on function public.public_join(text, jsonb) from public, anon, authenticated;
+grant execute on function public.public_join(text, jsonb) to service_role;
 
--- my_summary: also return ref_code and terms acceptance (same shape otherwise)
+-- my_summary: also return ref_code and unread counts (same shape otherwise)
 create or replace function public.my_summary()
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare f record; b record;
@@ -255,7 +246,7 @@ begin
   return jsonb_build_object(
     'freelancer', jsonb_build_object('id', f.id, 'name', f.name, 'mobile', f.mobile, 'email', f.email,
                                      'gov', f.gov, 'region', f.region, 'status', f.status, 'created_at', f.created_at,
-                                     'ref_code', f.ref_code, 'terms_version', f.terms_version),
+                                     'ref_code', f.ref_code),
     'balance', to_jsonb(b),
     'counts', (select jsonb_build_object(
                  'total', count(*),
@@ -293,3 +284,9 @@ begin
 end $$;
 revoke all on function public.admin_fraud_signals() from public, anon;
 grant execute on function public.admin_fraud_signals() to authenticated;
+
+-- hardening (applied as phase2_batch1_hardening)
+alter function public.fmt_amount(numeric) set search_path = public;
+revoke all on function public.notify_candidate_change() from public, anon, authenticated;
+revoke all on function public.notify_ledger_insert() from public, anon, authenticated;
+revoke all on function public.notify_withdrawal_change() from public, anon, authenticated;

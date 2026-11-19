@@ -55,14 +55,68 @@ td .acts{display:flex;gap:4px;flex-wrap:wrap}
 
 .pager{display:flex;justify-content:space-between;align-items:center;padding:8px 2px;font-size:13px}
 
+/* ---- Funnel & stale ---- */
+.funnel{display:flex;flex-direction:column;gap:8px}
+.fn-row{display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:10px;font-size:13px}
+.fn-b{height:22px;background:#eef2f6;border-radius:6px;overflow:hidden}
+.fn-b i{display:block;height:100%;background:#10a861;border-radius:0 4px 4px 0}
+.fn-n{text-align:left;white-space:nowrap}
+.stale{border-color:#fcd9a8;background:#fffaf2}
+.stale.ok{border-color:var(--line);background:#f4fbf7;color:var(--g2);font-weight:700}
+
+/* ---- Courier documents ---- */
+.docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.doc{border:1px solid var(--line);background:#fff;border-radius:12px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font:inherit;text-align:center;transition:border-color .15s}
+.doc:hover{border-color:var(--g)}
+.doc img{width:100%;height:84px;object-fit:cover;border-radius:8px;background:#f1f5f9}
+.doc-ic{font-size:34px;height:84px;display:grid;place-items:center}
+.doc-n{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-d{font-size:10.5px;color:var(--mute)}
+
+/* ---- Logo upload ---- */
+.logo-up{display:flex;align-items:center;gap:10px}
+.logo-up .co-logo img{width:100%;height:100%;object-fit:cover}
+.logo-up label.busy{opacity:.5;pointer-events:none}
+
+/* ---- Chat inbox ---- */
+.chat-wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;height:calc(100vh - 120px);min-height:420px}
+.chat-list{display:flex;flex-direction:column;gap:8px;padding:10px;overflow:hidden}
+.chat-list [data-threads]{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:2px}
+.thread{display:flex;gap:10px;align-items:center;border:0;background:none;padding:9px;border-radius:12px;cursor:pointer;text-align:right;font:inherit;width:100%}
+.thread:hover{background:#f1f5f9}
+.thread.on{background:var(--g-soft)}
+.th-av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#10a861,#f37021);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}
+.th-b{flex:1;min-width:0;display:flex;flex-direction:column}
+.th-b span{font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th-e{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none}
+.thread .badge{background:#f37021;color:#fff;border-radius:99px;font-size:11px;padding:0 7px;font-weight:900;line-height:1.6}
+.chat-pane{display:flex;flex-direction:column;padding:0;overflow:hidden}
+.cp-h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.cp-back{display:none}
+.bubbles{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px;background:#f8fafc}
+.bub{max-width:78%;padding:9px 12px;border-radius:16px;font-size:14px;line-height:1.55;word-break:break-word}
+.bub span{display:block;font-size:10.5px;opacity:.65;margin-top:3px}
+.bub.them{align-self:flex-start;background:#fff;border:1px solid var(--line);border-top-right-radius:4px}
+.bub.me{align-self:flex-end;background:#10a861;color:#fff;border-top-left-radius:4px}
+.cp-send{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);align-items:flex-end}
+.cp-send textarea{min-height:44px;max-height:140px;resize:vertical}
+
 /* ---- Responsive ---- */
 @media(max-width:900px){
-  .layout{grid-template-columns:1fr}
-  .side{position:static;height:auto}
+  .layout{grid-template-columns:minmax(0,1fr)}
+  .layout>*{min-width:0}
+  .side{position:static;height:auto;min-width:0}
   .side nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:4px;padding:4px 0;margin:8px 0}
-  .side nav button{flex:none;white-space:nowrap;padding:8px 12px;flex-direction:column;gap:4px;font-size:12px;min-width:70px;border-radius:12px}
+  .side nav button{flex:none;width:auto;white-space:nowrap;padding:8px 12px;flex-direction:column;gap:4px;font-size:12px;min-width:70px;border-radius:12px}
   .side nav button .ico{width:20px;height:20px}
   .side nav button .ico svg{width:20px;height:20px}
   .side nav button .lbl{text-align:center}
   .main{padding:12px}
+  .fn-row{grid-template-columns:110px 1fr 70px;font-size:12px}
+  .chat-wrap{grid-template-columns:1fr;height:calc(100dvh - 210px)}
+  .chat-wrap .chat-pane{display:none}
+  .chat-wrap.open .chat-list{display:none}
+  .chat-wrap.open .chat-pane{display:flex}
+  .cp-back{display:inline-flex}
+  .bub{max-width:88%}
 }

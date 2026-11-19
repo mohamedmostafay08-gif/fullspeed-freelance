@@ -316,6 +316,9 @@ async function boot() {
 function updateLevelChip() {
   const lv = level(S.summary?.counts?.hired || 0);
   const el = $('#lvChip'); el.textContent = `${lv.i} ${lv.n}`; el.style.setProperty('--lc', lv.c);
+  const u = S.summary?.unread || {};
+  const set = (id, n) => { const b = $(id); b.textContent = n > 9 ? '9+' : n; b.hidden = !n; };
+  set('#bellBadge', u.notifications || 0); set('#chatBadge', u.messages || 0);
 }
 
 // ------------------------------------------------------------------ nav
@@ -323,11 +326,152 @@ $$('.dock [data-go]').forEach((b) => b.onclick = () => { buzz(5); go(b.dataset.g
 $('#fab').onclick = () => addCourier();
 $('#meBtn').onclick = () => go('me');
 $('#lvChip').onclick = () => go('me');
+$('#bellBtn').onclick = () => { buzz(5); notificationsSheet(); };
+$('#chatBtn').onclick = () => { buzz(5); go('chat'); };
+let chatTimer = null;
 function go(v) {
   S.view = v;
+  clearInterval(chatTimer);
   $$('.dock [data-go]').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
+  $('#chatBtn').classList.toggle('on', v === 'chat');
   window.scrollTo(0, 0);
-  ({ home, jobs, couriers, wallet, me })[v]();
+  ({ home, jobs, couriers, wallet, me, chat })[v]();
+}
+
+// ------------------------------------------------------------------ notifications
+const NOTIF_IC = { hired: '🎉', rejected: '❌', accepted: '✅', paper: '📄', bonus: '💰', paid: '💸', wd_rejected: '⚠️', message: '💬', self_join: '🙌' };
+const ago = (d) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(d)) / 60000));
+  return m < 1 ? 'دلوقتي' : m < 60 ? `من ${m} دقيقة` : m < 1440 ? `من ${Math.round(m / 60)} ساعة` : m < 2880 ? 'امبارح' : fmtDate(d);
+};
+async function notificationsSheet() {
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--orange)">🔔</div><div><h2>الإشعارات</h2><p>آخر اللي حصل في حسابك</p></div></div><div class="nlist"><div class="spin"></div></div>`);
+  const { data, error } = await sb.from('notifications').select('id,kind,title,body,link,created_at,read_at').order('created_at', { ascending: false }).limit(60);
+  const box = $('.nlist', m.el);
+  if (error) { box.innerHTML = empty('⚠️', 'مقدرناش نحمّل الإشعارات', errMsg(error)); return; }
+  box.innerHTML = data.length ? data.map((n) => `<button class="nitem ${n.read_at ? '' : 'unread'}" data-link="${esc(n.link || '')}">
+      <span class="n-ic">${NOTIF_IC[n.kind] || '🔔'}</span>
+      <span class="grow"><b>${esc(n.title)}</b>${n.body ? `<span>${esc(n.body)}</span>` : ''}<em>${ago(n.created_at)}</em></span></button>`).join('')
+    : empty('🔕', 'مفيش إشعارات لسه', 'أول ما مندوب يتعيّن أو بونص ينزل هتلاقيه هنا.');
+  $$('[data-link]', box).forEach((b) => b.onclick = () => { const l = b.dataset.link; m.close(); if (l) go(l); });
+  if (data.some((n) => !n.read_at)) { await sb.rpc('mark_notifications_read'); if (S.summary.unread) S.summary.unread.notifications = 0; updateLevelChip(); }
+}
+
+// ------------------------------------------------------------------ chat with admin
+async function chat() {
+  view(`<div class="page-h"><div><h2>كلّم الإدارة</h2><p>اسأل عن مندوب، طلب سحب أو أي حاجة — بنرد في أقرب وقت</p></div></div>
+    <div class="chat" id="chatBox"><div class="spin"></div></div>
+    <form class="composer" id="chatForm"><textarea class="in" name="body" rows="1" maxlength="2000" placeholder="اكتب رسالتك..." required></textarea>
+      <button class="btn pri" aria-label="إرسال">${IC.send}</button></form>`);
+  const box = $('#chatBox'), f = $('#chatForm'), ta = f.body;
+  let lastId = 0;
+  const bubble = (x) => `<div class="bub ${x.from_staff ? 'them' : 'me'}"><p>${esc(x.body)}</p><em>${ago(x.created_at)}${!x.from_staff && x.read_at ? ' · ✓✓' : ''}</em></div>`;
+  const load = async () => {
+    const { data, error } = await sb.from('messages').select('id,from_staff,body,created_at,read_at').order('created_at').limit(300);
+    if (S.view !== 'chat') return;
+    if (error) { box.innerHTML = empty('⚠️', 'مقدرناش نحمّل المحادثة', errMsg(error)); return; }
+    const newest = data.length ? data[data.length - 1].id : 0;
+    if (newest === lastId && box.dataset.ok) return;
+    lastId = newest; box.dataset.ok = '1';
+    box.innerHTML = data.length ? data.map(bubble).join('') : '<div class="chat-empty">👋 أهلاً بيك! اكتب سؤالك وفريق Full Speed هيرد عليك هنا.</div>';
+    box.scrollTop = box.scrollHeight; window.scrollTo(0, document.body.scrollHeight);
+    if (data.some((x) => x.from_staff && !x.read_at)) { await sb.rpc('mark_messages_read'); if (S.summary.unread) S.summary.unread.messages = 0; updateLevelChip(); }
+  };
+  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = ta.value.trim(); if (!body) return;
+    await busy($('button', f), async () => {
+      const { error } = await sb.rpc('send_message', { p_body: body });
+      if (error) { toast(errMsg(error), 'bad'); return; }
+      ta.value = ''; ta.style.height = 'auto'; buzz(8); await load();
+    });
+  };
+  await load();
+  chatTimer = setInterval(load, 15000);
+}
+
+// ------------------------------------------------------------------ personal referral link + QR
+const refLink = () => `${location.origin}/join.html?r=${encodeURIComponent(S.summary.freelancer.ref_code || '')}`;
+let qrLib = null;
+const loadQR = () => qrLib || (qrLib = new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+  s.onload = () => res(window.qrcode); s.onerror = () => { qrLib = null; rej(new Error('qr')); }; document.head.appendChild(s);
+}));
+async function refSheet() {
+  if (!S.summary.freelancer.ref_code) { toast('اللينك لسه بيتجهّز، جرّب كمان شوية', 'bad'); return; }
+  const url = refLink();
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">🔗</div><div><h2>لينكك الشخصي</h2><p>المندوب يفتحه ويسجّل بنفسه، ويتحسب ليك على طول</p></div></div>
+    <div class="qr-box"><div class="qr" id="qr"><div class="spin"></div></div><img src="brand/fs-mark.png" alt="" class="qr-mark"></div>
+    <div class="ref-url mono">${esc(url)}</div>
+    <div class="sheet-actions"><button class="btn pri grow" data-sh>📤 ابعت اللينك</button><button class="btn sec" data-cp>📋 نسخ</button><button class="btn sec" data-dl>⬇️ QR</button></div>`);
+  let canvas = null;
+  try {
+    const qrcode = await loadQR(); const q = qrcode(0, 'H'); q.addData(url); q.make();
+    const n = q.getModuleCount(), cell = Math.floor(560 / (n + 8)), size = cell * (n + 8);
+    canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
+    const x = canvas.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, size, size); x.fillStyle = '#0b5c38';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) x.fillRect((c + 4) * cell, (r + 4) * cell, cell, cell);
+    const mark = await loadImg('brand/fs-mark.png'); const ms = size * 0.22;
+    x.fillStyle = '#fff'; x.beginPath(); x.arc(size / 2, size / 2, ms * 0.62, 0, Math.PI * 2); x.fill(); x.drawImage(mark, (size - ms) / 2, (size - ms) / 2, ms, ms);
+    $('#qr', m.el).replaceChildren(canvas); $('.qr-mark', m.el).remove();
+  } catch { $('#qr', m.el).innerHTML = '<p class="muted small">مقدرناش نعمل الـ QR دلوقتي، استخدم اللينك.</p>'; }
+  const text = `🚀 عايز تشتغل مندوب مع Full Speed؟\nسجّل بياناتك من هنا وهنكلمك 👇\n${url}`;
+  $('[data-sh]', m.el).onclick = () => (navigator.share ? navigator.share({ text }).catch(() => {}) : window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener'));
+  $('[data-cp]', m.el).onclick = async () => { try { await navigator.clipboard.writeText(url); toast('اتنسخ ✅', 'ok'); } catch { toast(url); } };
+  $('[data-dl]', m.el).onclick = () => {
+    if (!canvas) return;
+    canvas.toBlob((b) => {
+      const file = new File([b], 'fullspeed-qr.png', { type: 'image/png' });
+      if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file], text }).catch(() => {});
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = file.name; a.click(); }
+    }, 'image/png');
+  };
+}
+
+// ------------------------------------------------------------------ courier documents
+async function shrinkImage(file) {
+  if (!file.type.startsWith('image/') || file.type === 'image/heic' || file.size < 600 * 1024) return file;
+  const img = await loadImg(URL.createObjectURL(file)).catch(() => null); if (!img) return file;
+  const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
+  return blob ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+}
+async function docsSheet(c) {
+  const dir = `${S.summary.freelancer.id}/${c.id}`;
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--sky)">📎</div><div><h2>ورق ${esc(c.name)}</h2><p>صوّر البطاقة والرخصة والفيش وارفعهم هنا — الإدارة بس اللي بتشوفهم</p></div></div>
+    <div class="docs" id="docs"><div class="spin"></div></div>
+    <label class="btn pri block up-btn"><input type="file" accept="image/*,application/pdf" multiple hidden>📷 صوّر أو ارفع ورق</label>
+    <p class="muted small" style="text-align:center;margin:8px 0 0">صور أو PDF — لحد 6 ميجا للملف</p>`);
+  const box = $('#docs', m.el), inp = $('input', m.el);
+  const load = async () => {
+    const { data, error } = await sb.storage.from('courier-docs').list(dir, { sortBy: { column: 'created_at', order: 'desc' } });
+    if (error) { box.innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
+    const files = (data || []).filter((f) => f.name && !f.name.startsWith('.'));
+    if (!files.length) { box.innerHTML = '<div class="docs-empty">لسه مفيش ورق مرفوع</div>'; return; }
+    const { data: urls } = await sb.storage.from('courier-docs').createSignedUrls(files.map((f) => `${dir}/${f.name}`), 300);
+    box.innerHTML = files.map((f, k) => {
+      const u = urls?.[k]?.signedUrl || '#', pdf = /\.pdf$/i.test(f.name);
+      return `<a class="doc" href="${esc(u)}" target="_blank" rel="noopener">${pdf ? '<span class="doc-pdf">PDF</span>' : `<img src="${esc(u)}" alt="" loading="lazy">`}<em>${fmtDate(f.created_at)}</em></a>`;
+    }).join('');
+  };
+  inp.onchange = async () => {
+    const files = [...inp.files]; if (!files.length) return;
+    const lbl = $('.up-btn', m.el); lbl.classList.add('busy'); lbl.lastChild.textContent = `بنرفع ${files.length} ملف...`;
+    let ok = 0;
+    for (const f0 of files) {
+      const f = await shrinkImage(f0);
+      if (f.size > 6 * 1024 * 1024) { toast(`${f0.name}: الملف أكبر من 6 ميجا`, 'bad'); continue; }
+      const ext = (f.name.match(/\.(\w+)$/)?.[1] || 'jpg').toLowerCase();
+      const { error } = await sb.storage.from('courier-docs').upload(`${dir}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`, f, { contentType: f.type, upsert: false });
+      if (error) toast(errMsg(error), 'bad'); else ok++;
+    }
+    lbl.classList.remove('busy'); lbl.lastChild.textContent = '📷 صوّر أو ارفع ورق'; inp.value = '';
+    if (ok) { toast(`اترفع ${ok} ملف ✅`, 'ok'); buzz(20); }
+    load();
+  };
+  load();
 }
 const view = (html) => {
   const el = $('#view');
@@ -351,7 +495,7 @@ async function loadJobs() {
 async function loadCands(force) {
   if (S.cands && !force) return;
   const [a, b] = await Promise.all([
-    sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at').order('created_at', { ascending: false }),
+    sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at,source').order('created_at', { ascending: false }),
     sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,note').order('created_at', { ascending: false }),
   ]);
   if (a.error) throw a.error;
@@ -425,6 +569,8 @@ async function home() {
       </span>
     </button>
     ${installCard()}
+    ${S.summary.freelancer.ref_code ? `<button class="refcard rise" style="--i:2" data-ref>
+      <span class="rc-ic">🔗</span><span class="grow"><b>لينكك الشخصي + QR</b><span>ابعته للمناديب يسجّلوا بنفسهم ويتحسبوا ليك</span></span><span class="rc-go">${IC.chev}</span></button>` : ''}
 
     ${fcBig ? `<button class="fcast rise" style="--i:2" data-nav="couriers:${fc.active ? 'hired' : ''}">
       <span class="fc-ic">🚀</span>
@@ -485,6 +631,7 @@ async function home() {
   });
   bindJobActions($('#view'));
   bindInstall();
+  $('[data-ref]')?.addEventListener('click', refSheet);
   $$('.pl').forEach((b) => b.onclick = () => { buzz(8); S.jobCo = b.dataset.co; go('jobs'); });
 }
 function jobLogo(j) {
@@ -756,7 +903,7 @@ function addCourier(job) {
     <form class="stack">
       <div class="grid2">
         <div><label class="f">اسم المندوب</label><input class="in" name="name" required maxlength="120"></div>
-        <div><label class="f">موبايل المندوب</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx"></div>
+        <div><label class="f">موبايل المندوب</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx"><div class="mob-hint" aria-live="polite"></div></div>
       </div>
       ${job ? '' : `<div><label class="f">الشركة</label><select class="in" name="company" required><option value="">اختار...</option>${comps.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></div>`}
       <div><label class="f">نوع المركبة</label><div class="vgrid">${VEHICLES.map((v) => `<label class="vopt"><input type="radio" name="vehicle" value="${esc(v)}" ${v === vSel ? 'checked' : ''}><span><em>${VEH_EMOJI[v] || '🚚'}</em>${esc(v)}</span></label>`).join('')}</div></div>
@@ -768,6 +915,23 @@ function addCourier(job) {
       <div class="sheet-actions"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri grow">إرسال الترشيح ${IC.send}</button></div>
     </form>`);
   const f = $('form', m.el);
+  const hint = $('.mob-hint', f), sendBtn = $('button.pri', f);
+  let dupT = null, dupFor = '';
+  f.mobile.oninput = () => {
+    clearTimeout(dupT);
+    const mob = normMobile(f.mobile.value);
+    if (!/^1[0125]\d{8}$/.test(mob)) { hint.className = 'mob-hint'; hint.textContent = ''; sendBtn.disabled = false; return; }
+    hint.className = 'mob-hint wait'; hint.textContent = 'بنتأكد من الرقم...';
+    dupT = setTimeout(async () => {
+      dupFor = mob;
+      const { data, error } = await sb.rpc('check_courier_mobile', { p_mobile: mob });
+      if (dupFor !== normMobile(f.mobile.value)) return;
+      if (error) { hint.className = 'mob-hint'; hint.textContent = ''; return; }
+      const msg = { free: ['ok', '✓ الرقم متاح'], mine: ['bad', 'المندوب ده مترشّح باسمك قبل كده — هتلاقيه في "مناديبي"'], taken: ['bad', 'الرقم ده متسجل قبل كده مع شريك تاني'] }[data] || ['', ''];
+      hint.className = 'mob-hint ' + msg[0]; hint.textContent = msg[1]; sendBtn.disabled = msg[0] === 'bad';
+      if (msg[0] === 'bad') buzz([12, 60, 12]);
+    }, 350);
+  };
   f.onsubmit = async (e) => {
     e.preventDefault();
     const mob = normMobile(f.mobile.value);
@@ -811,6 +975,7 @@ async function couriers() {
       ? empty('🤝', 'لسه مرشحتش مناديب', 'أول ترشيح هو أول خطوة لأول بونص ليك.', 'رشّح أول مندوب')
       : list.length ? list.map((c, i) => candCard(c, earnedBy[c.id] || 0, i)).join('') : empty('🔍', 'مفيش نتايج', 'جرّب حالة تانية أو امسح البحث.');
     const cta = $('[data-empty-cta]', box); if (cta) cta.onclick = () => addCourier();
+    $$('[data-docs]', box).forEach((b) => b.onclick = () => docsSheet(S.cands.find((c) => c.id === b.dataset.docs)));
     animateIn(box);
   };
   if (S.cands.length) {
@@ -850,8 +1015,10 @@ function candCard(c, earned, i) {
     <div class="cc-foot">
       <span>الورق: <b>${c.paper_date ? fmtDate(c.paper_date) : '—'}</b></span>
       <span class="earn">أرباحك منه<b>${money(earned)}</b></span>
+      ${c.status !== 'rejected' ? `<button class="ibtn docs-btn" data-docs="${esc(c.id)}" aria-label="ورق ${esc(c.name)}">📎</button>` : ''}
       <a class="ibtn wa" href="${waLink(c.mobile)}" target="_blank" rel="noopener" aria-label="كلّم المندوب واتساب">${IC.chat}</a>
     </div>
+    ${c.source === 'self' ? '<div class="cc-src">🔗 سجّل من لينكك</div>' : ''}
   </article>`;
 }
 
@@ -1023,6 +1190,10 @@ async function me() {
         <div><b data-count="${Number(S.summary.balance?.total_earned) || 0}" data-money>${money(0)}</b><span>أرباحك</span></div>
       </div>
     </section>
+    ${f.ref_code ? `<button class="refcard rise" style="--i:1;margin-top:14px" data-ref>
+      <span class="rc-ic">🔗</span><span class="grow"><b>لينكك الشخصي + QR</b><span>ابعته للمناديب يسجّلوا بنفسهم ويتحسبوا ليك</span></span><span class="rc-go">${IC.chev}</span></button>` : ''}
+    <button class="refcard chatcard rise" style="--i:1;margin-top:10px" data-chat>
+      <span class="rc-ic">💬</span><span class="grow"><b>كلّم الإدارة</b><span>اسأل عن مندوب أو طلب سحب</span></span><span class="rc-go">${IC.chev}</span></button>
     <section class="card rise" style="--i:1;margin-top:14px">
       <div class="bd-h"><h3>🏅 إنجازاتك</h3><span>${got} من ${bdg.length}</span></div>
       <div class="badges">${bdg.map(([ic, t, s]) => `<div class="bdg ${s.ok ? 'ok' : ''}" title="${esc(t)}"><span class="bd-ic">${ic}</span><b>${esc(t)}</b>${s.ok ? '<em>✓</em>' : `<em>${s.prog}</em>`}</div>`).join('')}</div>
@@ -1055,6 +1226,8 @@ async function me() {
     <button class="btn out block rise" style="--i:4;margin-top:10px" data-logout>${IC.logout} تسجيل الخروج</button>`);
   $('#view [data-logout]').onclick = logout;
   $('#view [data-tour]').onclick = () => maybeTour(true);
+  $('#view [data-ref]')?.addEventListener('click', refSheet);
+  $('#view [data-chat]').onclick = () => go('chat');
   $$('[data-theme-set]').forEach((b) => b.onclick = () => {
     const v = b.dataset.themeSet;
     store.set('fsf-theme', v); applyTheme(v); buzz(5);

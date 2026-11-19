@@ -19,13 +19,15 @@ const ICONS = {
   jobs: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="13" rx="2"/><path d="M16 8V6a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><path d="M2 13h20"/></svg>`,
   staff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3.5"/><path d="M2 21c0-3.6 2.7-6.5 7-6.5h2"/><circle cx="18.5" cy="16.5" r="3"/><path d="M15.8 13.8l1 1M21.2 19.2l1 1M13 16.5h1.5M22 16.5h1.5M15.8 19.2l1-1M21.2 13.8l1-1"/></svg>`,
   audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>`,
+  chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 01-12.6 7.4L3 20l1.2-4.2A8.5 8.5 0 1121 11.5z"/><path d="M8 10h8M8 13.5h5"/></svg>`,
+  fraud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
 };
 const NAV = [
   ['dash', 'لوحة المؤشرات', 'view'], ['partners', 'الشركاء', 'view'], ['couriers', 'المناديب', 'view'],
-  ['withdrawals', 'طلبات السحب', 'view'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
-  ['staff', 'فريق الإدارة', 'staff'], ['audit', 'سجل التغييرات', 'audit'],
+  ['withdrawals', 'طلبات السحب', 'view'], ['chat', 'المحادثات', 'partners'], ['companies', 'الشركات والبونص', 'view'], ['jobs', 'الوظائف', 'view'],
+  ['fraud', 'مؤشرات التلاعب', 'partners'], ['staff', 'فريق الإدارة', 'staff'], ['audit', 'سجل التغييرات', 'audit'],
 ];
-const S = { me: null, view: 'dash', companies: [], fl: [], flMap: new Map() };
+const S = { me: null, view: 'dash', companies: [], fl: [], flMap: new Map(), poll: null, courSt: '' };
 const can = (p) => (ROLE_PERMS[S.me?.role] ?? []).includes(p);
 const show = (id) => ['auth', 'noaccess', 'app'].forEach((x) => $('#' + x).classList.toggle('hidden', x !== id));
 const view = (h) => { $('#view').innerHTML = h; };
@@ -80,12 +82,19 @@ async function loadBase() {
   const bd = $('[data-badge=withdrawals]'); if (bd) { bd.textContent = count || ''; bd.classList.toggle('hidden', !count); }
   const pend = f.filter((x) => x.status === 'Pending' && !x.duplicate_of).length;
   const bp = $('[data-badge=partners]'); if (bp) { bp.textContent = pend || ''; bp.classList.toggle('hidden', !pend); }
+  await chatBadge();
+}
+async function chatBadge() {
+  const bc = $('[data-badge=chat]'); if (!bc || !can('partners')) return;
+  const { count } = await sb.from('messages').select('*', { count: 'exact', head: true }).eq('from_staff', false).is('read_at', null);
+  bc.textContent = count || ''; bc.classList.toggle('hidden', !count);
 }
 function go(v) {
   S.view = v;
+  if (S.poll) { clearInterval(S.poll); S.poll = null; }
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
   loading();
-  ({ dash, partners, couriers, withdrawals, companies, jobs, staff, audit })[v]().catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
+  ({ dash, partners, couriers, withdrawals, chat, companies, jobs, fraud, staff, audit })[v]().catch((e) => view(`<div class="card empty">${esc(errMsg(e))}</div>`));
 }
 
 // generic paged table renderer
@@ -109,7 +118,7 @@ function pagedTable(host, rows, cols, { pageSize = 50, onRender } = {}) {
 async function dash() {
   if (can('view')) await sb.rpc('accrue_all');
   const [cands, bal, wds, jobsQ] = await Promise.all([
-    fetchAll(() => sb.from('candidates').select('status,company_id,company_name')),
+    fetchAll(() => sb.from('candidates').select('*')),
     fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,total_earned,paid,pending,balance')),
     fetchAll(() => sb.from('withdrawals').select('status,amount')),
     sb.from('jobs').select('status'),
@@ -141,7 +150,51 @@ async function dash() {
     <div class="grid2" style="margin-top:12px">
       <div class="card"><h3>المناديب الشغالين حسب الشركة</h3>${topComp.map(([n, v]) => `<div class="hbar"><span class="l">${esc(n)}</span><span class="b"><i style="width:${v / maxC * 100}%"></i></span><span class="n">${v}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
       <div class="card"><h3>أعلى الشركاء أرباحاً</h3>${topFl.map(({ f, e }) => `<div class="hbar"><span class="l">${esc(f.name)}</span><span class="b"><i style="width:${e / maxF * 100}%;background:var(--amber)"></i></span><span class="n">${Math.round(e)}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
-    </div>`);
+    </div>
+    ${funnelHtml(cands)}
+    ${staleHtml(cands)}`);
+  $$('[data-stale]').forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.stale)]));
+  const sa = $('[data-stale-all]'); if (sa) sa.onclick = () => { S.courSt = 'submitted'; go('couriers'); };
+}
+
+// Candidate journey: every stage counts candidates that reached it (not rejected).
+function funnelStats(list) {
+  const live = list.filter((c) => c.status !== 'rejected');
+  return {
+    total: list.length,
+    accepted: live.filter((c) => c.status !== 'submitted').length,
+    paper: live.filter((c) => c.paper_date).length,
+    started: live.filter((c) => c.start_date).length,
+    hired: list.filter((c) => c.status === 'hired').length,
+  };
+}
+function funnelHtml(cands) {
+  const s = funnelStats(cands);
+  const pct = (n) => (s.total ? Math.round((n / s.total) * 100) : 0);
+  const stages = [['الترشيحات', s.total], ['اتقبلوا بعد المراجعة', s.accepted], ['خلّصوا الورق', s.paper], ['بدأوا شغل', s.started], ['شغالين دلوقتي', s.hired]];
+  const byCo = new Map();
+  cands.forEach((c) => { const k = c.company_id || 'none'; if (!byCo.has(k)) byCo.set(k, []); byCo.get(k).push(c); });
+  const rows = [...byCo.entries()].map(([k, l]) => ({ name: k === 'none' ? (l[0].company_name || 'بدون شركة') : compName(k, l[0].company_name), ...funnelStats(l) }))
+    .sort((a, b) => b.total - a.total).slice(0, 10);
+  return `<div class="card" style="margin-top:12px"><h3>رحلة المندوب (Funnel)</h3>
+    <p class="small muted" style="margin:-4px 0 10px">كل مرحلة = عدد المناديب اللي وصلوها من إجمالي الترشيحات (المرفوضين مش محسوبين في المراحل).</p>
+    <div class="funnel">${stages.map(([t, n]) => `<div class="fn-row"><span class="fn-l">${t}</span><span class="fn-b"><i style="width:${s.total ? Math.max(2, (n / s.total) * 100) : 0}%"></i></span><span class="fn-n"><b>${n}</b> <span class="muted">${pct(n)}%</span></span></div>`).join('')}</div>
+    <div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>الشركة</th><th>ترشيحات</th><th>ورق</th><th>بدأوا</th><th>شغالين</th><th>نسبة التعيين</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.total}</td><td>${r.paper}</td><td>${r.started}</td><td>${r.hired}</td><td><span class="chip ${r.total && r.hired / r.total >= 0.3 ? 'g' : 'n'}">${r.total ? Math.round((r.hired / r.total) * 100) : 0}%</span></td></tr>`).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}
+    </tbody></table></div></div>`;
+}
+function staleHtml(cands) {
+  const cutoff = Date.now() - 48 * 3600 * 1000;
+  const stale = cands.filter((c) => c.status === 'submitted' && new Date(c.created_at).getTime() < cutoff)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  if (!stale.length) return `<div class="card stale ok" style="margin-top:12px">✅ مفيش ترشيحات مستنية مراجعة أكتر من 48 ساعة.</div>`;
+  const age = (c) => { const h = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 3600000); return h >= 48 ? `${Math.floor(h / 24)} يوم` : `${h} ساعة`; };
+  return `<div class="card stale" style="margin-top:12px">
+    <div class="ph" style="margin-bottom:8px"><h3 style="margin:0">⏰ ترشيحات متأخرة <span class="chip a">${stale.length}</span></h3><button class="btn sec sm" data-stale-all>عرض الكل في المناديب</button></div>
+    <p class="small muted" style="margin:0 0 8px">ترشيحات حالتها "تحت المراجعة" وعدّى عليها أكتر من 48 ساعة — الشريك مستني رد.</p>
+    <div class="tw"><table class="t"><thead><tr><th>المندوب</th><th>الشريك</th><th>الشركة</th><th>مستني من</th><th></th></tr></thead><tbody>
+      ${stale.slice(0, 10).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small mono muted">${esc(c.code || '')}</div></td><td>${esc(flName(c.freelancer_id))}</td><td>${esc(compName(c.company_id, c.company_name))}</td><td><span class="chip r">${age(c)}</span></td><td>${can('couriers') ? `<button class="btn pri sm" data-stale="${c.id}">مراجعة</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>${stale.length > 10 ? `<div class="small muted" style="margin-top:6px">و${stale.length - 10} كمان…</div>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ partners
@@ -342,13 +395,15 @@ async function couriers() {
       ['الأيام', (c) => { if (!c.start_date) return '<span class="small muted">لم يبدأ</span>'; const t = tgt[c.company_id] || 26; const d = daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()); return `<div class="small">${d} / ${t}${d >= t ? ' 🌟' : ''}</div><div class="bar"><i style="width:${Math.min(100, d / t * 100)}%"></i></div>`; }],
       ['الورق', (c) => c.paper_date ? `✅ <span class="small">${fmtDate(c.paper_date)}</span>` : '—'],
       ['البونص', (c) => `<b>${money(earned[c.id])}</b>`],
-      ['', (c) => can('couriers') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''],
+      ['', (c) => `<div class="acts"><button class="btn sec sm" data-docs="${c.id}" title="ورق المندوب">📎 الورق</button>${can('couriers') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((x) => x.onchange = () => { x.checked ? sel.add(x.dataset.sel) : sel.delete(x.dataset.sel); bulkBar(); });
       const all = $('[data-all]', h); if (all) all.onchange = () => { rows.forEach((c) => all.checked ? sel.add(c.id) : sel.delete(c.id)); render(); bulkBar(); };
       $$('[data-ed]', h).forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.ed)]));
+      $$('[data-docs]', h).forEach((b) => b.onclick = () => docsModal(cands.find((c) => c.id === b.dataset.docs)));
     } });
   };
+  if (S.courSt) { $('[data-st]').value = S.courSt; S.courSt = ''; }
   const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('couriers')); $('[data-n]').textContent = sel.size; };
   $('[data-bclear]').onclick = () => { sel.clear(); render(); bulkBar(); };
   $('[data-bedit]').onclick = () => courierEdit(cands.filter((c) => sel.has(c.id)));
@@ -376,6 +431,7 @@ function courierEdit(list) {
       </div>
       ${one ? `<div class="grid2"><div><label class="f">اسم المندوب</label><input class="in" name="name" value="${esc(one.name)}"></div><div><label class="f">المنطقة</label><input class="in" name="region" value="${esc(one.region || '')}"></div></div>
       <div><label class="f">ملاحظة</label><input class="in" name="note" value="${esc(one.admin_note || '')}"></div>` : ''}
+      ${one ? '<div><label class="f">📎 ورق المندوب</label><div data-docs-host><div class="small muted">جاري التحميل…</div></div></div>' : ''}
       <p class="small muted" style="margin:0">البونص بيتحسب تلقائي. اللي اتكسب مش بيتشال لو المندوب اتوقف، وبيتلغي بس لو اتغير لـ "مرفوض".</p>
       <div class="err" data-err></div>
       <div class="row" style="justify-content:space-between">
@@ -384,6 +440,7 @@ function courierEdit(list) {
       </div>
     </form>`);
   const f = $('form', m.el);
+  if (one) loadDocs($('[data-docs-host]', m.el), one);
   f.onsubmit = async (e) => {
     e.preventDefault();
     const upd = {};
@@ -414,6 +471,34 @@ function courierEdit(list) {
   };
 }
 
+// ------------------------------------------------------------------ courier documents (storage: courier-docs/<freelancer>/<candidate>/)
+async function loadDocs(host, c) {
+  const dir = `${c.freelancer_id}/${c.id}`;
+  const bucket = sb.storage.from('courier-docs');
+  const { data, error } = await bucket.list(dir, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+  if (error) { host.innerHTML = `<div class="small" style="color:var(--red)">${esc(errMsg(error))}</div>`; return; }
+  const files = (data || []).filter((x) => x.name && !x.name.startsWith('.'));
+  if (!files.length) { host.innerHTML = '<div class="small muted">الشريك لسه مرفعش ورق للمندوب ده.</div>'; return; }
+  const isImg = (x) => /^image\//.test(x.metadata?.mimetype || '') || /\.(jpe?g|png|webp|heic)$/i.test(x.name);
+  const { data: urls } = await bucket.createSignedUrls(files.map((x) => `${dir}/${x.name}`), 60);
+  const urlOf = (x) => (urls || []).find((u) => u.path === `${dir}/${x.name}`)?.signedUrl;
+  host.innerHTML = `<div class="docs">${files.map((x, i) => `<button type="button" class="doc" data-doc="${i}" title="${esc(x.name)}">
+    ${isImg(x) && urlOf(x) ? `<img src="${esc(urlOf(x))}" alt="" loading="lazy">` : '<span class="doc-ic">📄</span>'}
+    <span class="doc-n">${esc(x.name)}</span><span class="doc-d">${fmtDate(x.created_at)}</span></button>`).join('')}</div>`;
+  $$('[data-doc]', host).forEach((b) => b.onclick = async () => {
+    const x = files[Number(b.dataset.doc)];
+    const { data: s, error: e } = await bucket.createSignedUrl(`${dir}/${x.name}`, 60);
+    if (e) return toast(errMsg(e), 'bad');
+    window.open(s.signedUrl, '_blank', 'noopener');
+  });
+}
+function docsModal(c) {
+  const m = modal(`<div class="ph"><h2 style="margin:0">📎 ورق ${esc(c.name)}</h2><button class="btn ghost" data-close>✕</button></div>
+    <p class="small muted" style="margin-top:-6px">الشريك: ${esc(flName(c.freelancer_id))} • الروابط صالحة لدقيقة واحدة لكل فتحة.</p>
+    <div data-docs-host><div class="spin"></div></div>`);
+  loadDocs($('[data-docs-host]', m.el), c);
+}
+
 // ------------------------------------------------------------------ withdrawals
 async function withdrawals() {
   const [wds, bal] = await Promise.all([
@@ -422,7 +507,7 @@ async function withdrawals() {
   ]);
   const bMap = new Map(bal.map((b) => [b.freelancer_id, b]));
   view(`
-    <div class="ph"><h1>طلبات السحب</h1><button class="btn sec sm" data-csv>⬇️ تصدير</button></div>
+    <div class="ph"><h1>طلبات السحب</h1><button class="btn sec sm" data-csv title="بيصدّر الطلبات اللي ظاهرة حسب الفلتر">⬇️ تصدير للتحويل (Excel)</button></div>
     <div class="tools">
       <select class="in" data-st><option value="pending">قيد المراجعة</option><option value="paid">تم التحويل</option><option value="rejected">مرفوض</option><option value="">الكل</option></select>
       <input class="in q" placeholder="بحث بالشريك أو الموبايل" data-q>
@@ -456,8 +541,13 @@ async function withdrawals() {
     } });
   };
   $$('[data-st],[data-q]').forEach((el) => el.oninput = render);
-  $('[data-csv]').onclick = () => csvDownload('FullSpeed_Withdrawals.csv', ['التاريخ', 'الشريك', 'موبايل الشريك', 'المبلغ', 'الطريقة', 'بيانات التحويل', 'الحالة', 'ملاحظة'],
-    rows.map((w) => [fmtDate(w.created_at), flName(w.freelancer_id), '0' + (S.flMap.get(w.freelancer_id)?.mobile || ''), w.amount, w.method, w.details, WD_STATUS[w.status][0], w.admin_note]));
+  $('[data-csv]').onclick = () => {
+    if (!rows.length) return toast('مفيش طلبات في الفلتر الحالي', 'bad');
+    const st = $('[data-st]').value || 'all';
+    csvDownload(`FullSpeed_Withdrawals_${st}_${today()}.csv`, ['رقم الطلب', 'التاريخ', 'الشريك', 'موبايل الشريك', 'المبلغ', 'الطريقة', 'بيانات التحويل', 'الحالة', 'ملاحظة'],
+      rows.map((w) => [String(w.id).slice(0, 8), fmtDate(w.created_at), flName(w.freelancer_id), '0' + (S.flMap.get(w.freelancer_id)?.mobile || ''), w.amount, w.method, w.details, WD_STATUS[w.status]?.[0] ?? w.status, w.admin_note]));
+    toast(`تم تصدير ${rows.length} طلب • الإجمالي ${money(rows.reduce((a, w) => a + Number(w.amount || 0), 0))}`, 'ok');
+  };
   render();
 }
 
@@ -489,7 +579,10 @@ function companyEdit(c, rules) {
     <h2>${c ? 'تعديل ' + esc(c.name) : 'شركة جديدة'}</h2>
     <form class="stack">
       <div class="grid2"><div><label class="f">اسم الشركة</label><input class="in" name="name" value="${esc(c?.name || '')}" required></div>
-        <div><label class="f">رابط اللوجو</label><input class="in mono" name="logo" value="${esc(c?.logo_url || '')}" placeholder="https://..."></div></div>
+        <div><label class="f">اللوجو</label>
+          <div class="logo-up"><div class="logo co-logo" data-lprev>${c?.logo_url ? logoImg(c.logo_url, (c.name || '?').slice(0, 2)) : '🏢'}</div>
+            <label class="btn sec sm">⬆️ رفع صورة<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-lfile hidden></label></div>
+          <input class="in mono" name="logo" value="${esc(c?.logo_url || '')}" placeholder="أو الصق رابط https://..." style="margin-top:6px"></div></div>
       ${c ? `<label class="row small"><input type="checkbox" name="active" ${c.active ? 'checked' : ''}> الشركة مفعّلة (بتظهر في الترشيح)</label>` : `
       <div class="grid2"><div><label class="f">البونص الكامل</label><input class="in" type="number" name="full" value="1000" min="0"></div><div><label class="f">بعد كام يوم</label><input class="in" type="number" name="days" value="26" min="1"></div></div>
       <p class="small muted" style="margin:0">هيتعمل تلقائي: ورق 100، 7 أيام 200، 15 يوم 500، والبونص الكامل. تقدر تعدلهم بعد الحفظ.</p>`}
@@ -502,6 +595,18 @@ function companyEdit(c, rules) {
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri">حفظ</button></div>
     </form>`);
   const f = $('form', m.el);
+  $('[data-lfile]', m.el).onchange = async (e) => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    const lbl = e.target.closest('label');
+    try {
+      lbl.classList.add('busy');
+      const url = await uploadLogo(file, c?.id);
+      f.logo.value = url;
+      $('[data-lprev]', m.el).innerHTML = `<img src="${esc(url)}" alt="">`;
+      toast('تم رفع اللوجو ✅ — دوس حفظ', 'ok');
+    } catch (er) { toast(errMsg(er), 'bad'); } finally { lbl.classList.remove('busy'); }
+  };
   const wire = () => $$('[data-rm]', m.el).forEach((b) => b.onclick = () => b.closest('[data-tier]').remove());
   const at = $('[data-addt]', m.el); if (at) at.onclick = () => { $('[data-tiers]', m.el).insertAdjacentHTML('beforeend', tierRow()); wire(); };
   wire();
@@ -522,6 +627,155 @@ function companyEdit(c, rules) {
       m.close(); toast('تم الحفظ ✅', 'ok'); await loadBase(); go('companies');
     });
   };
+}
+
+// Logos go to the public company-logos bucket, downscaled to ≤320px so cards load fast.
+async function uploadLogo(file, companyId) {
+  if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) throw new Error('الصورة لازم تكون PNG أو JPG أو WEBP أو SVG');
+  let blob = file, ext = (file.name.split('.').pop() || 'png').toLowerCase();
+  if (file.type !== 'image/svg+xml') {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('الصورة مش مقروءة')); i.src = URL.createObjectURL(file); });
+    const scale = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale < 1 || file.size > 1048576) {
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      blob = await new Promise((res) => cv.toBlob(res, 'image/webp', 0.88)); ext = 'webp';
+    }
+    URL.revokeObjectURL(img.src);
+  }
+  if (!blob || blob.size > 1048576) throw new Error('الصورة أكبر من 1 ميجا');
+  const path = `${companyId || 'new'}-${Date.now()}.${ext}`;
+  const bucket = sb.storage.from('company-logos');
+  const { error } = await bucket.upload(path, blob, { contentType: blob.type || file.type, upsert: false });
+  if (error) throw error;
+  return bucket.getPublicUrl(path).data.publicUrl;
+}
+
+// ------------------------------------------------------------------ chat inbox
+async function chat(openId) {
+  if (S.poll) { clearInterval(S.poll); S.poll = null; }
+  const msgs = await fetchAll(() => sb.from('messages').select('id,freelancer_id,from_staff,body,created_at,read_at').order('created_at', { ascending: false }));
+  const threads = new Map();
+  msgs.forEach((m) => {
+    const t = threads.get(m.freelancer_id) || { fid: m.freelancer_id, last: m, unread: 0, n: 0 };
+    t.n++; if (!m.from_staff && !m.read_at) t.unread++;
+    threads.set(m.freelancer_id, t);
+  });
+  const list = [...threads.values()].sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at));
+  view(`
+    <div class="ph"><h1>المحادثات</h1><button class="btn pri sm" data-new>✉️ رسالة جديدة لشريك</button></div>
+    <div class="chat-wrap ${openId ? 'open' : ''}">
+      <div class="chat-list card">
+        <input class="in" placeholder="بحث باسم الشريك" data-cq>
+        <div data-threads></div>
+      </div>
+      <div class="chat-pane card" data-pane>${openId ? '<div class="spin"></div>' : '<div class="empty">اختار محادثة من القائمة</div>'}</div>
+    </div>`);
+  const drawList = () => {
+    const q = $('[data-cq]').value.trim().toLowerCase();
+    const rows = list.filter((t) => !q || flName(t.fid).toLowerCase().includes(q));
+    $('[data-threads]').innerHTML = rows.map((t) => `<button class="thread ${t.fid === openId ? 'on' : ''}" data-th="${t.fid}">
+      <span class="th-av">${esc(flName(t.fid).trim().slice(0, 1) || '؟')}</span>
+      <span class="th-b"><b>${esc(flName(t.fid))}</b><span>${t.last.from_staff ? 'انت: ' : ''}${esc(t.last.body.slice(0, 60))}</span></span>
+      <span class="th-e"><span class="small muted">${fmtDate(t.last.created_at)}</span>${t.unread ? `<span class="badge">${t.unread}</span>` : ''}</span></button>`).join('')
+      || '<div class="empty">لسه مفيش محادثات. الشركاء يقدروا يبعتوا من تطبيقهم، أو ابدأ انت برسالة جديدة.</div>';
+    $$('[data-th]').forEach((b) => b.onclick = () => openThread(b.dataset.th));
+  };
+  $('[data-cq]').oninput = drawList;
+  $('[data-new]').onclick = () => {
+    const opts = S.fl.filter((f) => !f.duplicate_of && f.user_id).map((f) => `<option value="${f.id}">${esc(f.name)} — 0${esc(f.mobile)}</option>`).join('');
+    const m = modal(`<h2>رسالة جديدة</h2><form class="stack">
+      <div><label class="f">الشريك</label><select class="in" name="fl" required><option value="">اختار...</option>${opts}</select></div>
+      <div><label class="f">الرسالة</label><textarea class="in" name="body" maxlength="2000" required></textarea></div>
+      <div class="err" data-err></div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri">إرسال</button></div></form>`);
+    const f = $('form', m.el);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      await busy($('button.pri', f), async () => {
+        const { error } = await sb.rpc('admin_send_message', { p_freelancer: f.fl.value, p_body: f.body.value });
+        if (error) return ($('[data-err]', f).textContent = errMsg(error));
+        m.close(); chat(f.fl.value);
+      });
+    };
+  };
+  async function openThread(fid) {
+    openId = fid;
+    $('.chat-wrap').classList.add('open');
+    $$('[data-th]').forEach((b) => b.classList.toggle('on', b.dataset.th === fid));
+    const pane = $('[data-pane]');
+    const f = S.flMap.get(fid);
+    pane.innerHTML = `<div class="cp-h"><button class="btn ghost sm cp-back" data-back>→ رجوع</button>
+        <div class="grow"><b>${esc(flName(fid))}</b><div class="small mono muted">0${esc(f?.mobile || '')}</div></div>
+        ${f ? `<a class="btn sec sm" href="${waLink(f.mobile)}" target="_blank" rel="noopener">واتساب</a>` : ''}</div>
+      <div class="bubbles" data-bubbles><div class="spin"></div></div>
+      <form class="cp-send" data-send><textarea class="in" name="body" rows="1" maxlength="2000" placeholder="اكتب ردك..." required></textarea><button class="btn pri">إرسال</button></form>`;
+    $('[data-back]', pane).onclick = () => { $('.chat-wrap').classList.remove('open'); };
+    const fm = $('[data-send]', pane);
+    fm.body.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fm.requestSubmit(); } };
+    fm.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = fm.body.value.trim(); if (!body) return;
+      await busy($('button', fm), async () => {
+        const { error } = await sb.rpc('admin_send_message', { p_freelancer: fid, p_body: body });
+        if (error) return toast(errMsg(error), 'bad');
+        fm.body.value = ''; await drawThread(fid);
+      });
+    };
+    await drawThread(fid);
+  }
+  async function drawThread(fid) {
+    const { data, error } = await sb.from('messages').select('*').eq('freelancer_id', fid).order('created_at');
+    const host = $('[data-bubbles]'); if (!host) return;
+    if (error) { host.innerHTML = `<div class="empty">${esc(errMsg(error))}</div>`; return; }
+    host.innerHTML = (data || []).map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}"><div>${esc(m.body).replace(/\n/g, '<br>')}</div>
+      <span>${new Date(m.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}${m.from_staff && m.read_at ? ' ✓✓' : ''}</span></div>`).join('') || '<div class="empty">مفيش رسايل لسه — ابدأ انت.</div>';
+    host.scrollTop = host.scrollHeight;
+    if ((data || []).some((m) => !m.from_staff && !m.read_at)) {
+      await sb.rpc('mark_messages_read', { p_freelancer: fid });
+      const t = threads.get(fid); if (t) t.unread = 0;
+      drawList(); chatBadge();
+    }
+  }
+  drawList();
+  if (openId) openThread(openId);
+  S.poll = setInterval(async () => {
+    if (S.view !== 'chat') return;
+    if (openId) await drawThread(openId);
+    await chatBadge();
+  }, 20000);
+}
+
+// ------------------------------------------------------------------ fraud / quality signals
+async function fraud() {
+  const { data: d, error } = await sb.rpc('admin_fraud_signals');
+  if (error) throw error;
+  const sec = (title, why, rows, cols) => `<div class="card" style="margin-top:12px">
+    <div class="ph" style="margin-bottom:6px"><h3 style="margin:0">${title}</h3><span class="chip ${rows.length ? 'r' : 'g'}">${rows.length ? rows.length + ' حالة' : 'مفيش ✅'}</span></div>
+    <p class="small muted" style="margin:0 0 10px">${why}</p>
+    ${rows.length ? `<div class="tw"><table class="t"><thead><tr>${cols.map((c) => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
+      ${rows.map((r) => `<tr>${cols.map((c) => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : ''}</div>`;
+  const flCell = (r) => `<b>${esc(r.freelancer)}</b>${S.flMap.get(r.freelancer_id) ? `<div class="small mono muted">0${esc(S.flMap.get(r.freelancer_id).mobile)}</div>` : ''}`;
+  const stale = Number(d.stale_submissions || 0);
+  view(`
+    <div class="ph"><h1>مؤشرات التلاعب والجودة</h1><span class="small muted">علامات تستاهل مراجعة — مش اتهام</span></div>
+    <div class="grid4">
+      <div class="card kpi ${d.self_nominated.length ? 'a' : 'g'}"><div class="lbl">ترشيح النفس</div><div class="val">${d.self_nominated.length}</div></div>
+      <div class="card kpi ${d.bursts.length ? 'a' : 'g'}"><div class="lbl">ترشيحات بكميات غريبة</div><div class="val">${d.bursts.length}</div></div>
+      <div class="card kpi ${d.quick_quits.length ? 'a' : 'g'}"><div class="lbl">مناديب بيسيبوا بسرعة</div><div class="val">${d.quick_quits.length}</div></div>
+      <div class="card kpi ${stale ? 'a' : 'g'}"><div class="lbl">ترشيحات متأخرة +48 ساعة</div><div class="val">${stale}</div></div>
+    </div>
+    ${sec('🪞 شريك رشّح نفسه', 'رقم المندوب هو نفس رقم الشريك — يعني الشريك سجّل نفسه كمندوب عشان ياخد البونص.', d.self_nominated,
+      [['الشريك', flCell], ['المندوب', (r) => esc(r.courier)], ['الكود', (r) => `<span class="mono small">${esc(r.code || '')}</span>`]])}
+    ${sec('📈 ترشيحات كتير في يوم واحد', 'شريك رشّح 10 مناديب أو أكتر في نفس اليوم خلال آخر 30 يوم — ممكن يكون نشاط حقيقي أو أرقام وهمية.', d.bursts,
+      [['الشريك', flCell], ['اليوم', (r) => fmtDate(r.day)], ['عدد الترشيحات', (r) => `<b>${r.count}</b>`]])}
+    ${sec('🚪 مناديب بيسيبوا الشغل بسرعة', 'شريك عنده 3 مناديب أو أكتر بدأوا شغل وسابوه في أقل من 7 أيام — ممكن مناديب بتدخل عشان الورق بس.', d.quick_quits,
+      [['الشريك', flCell], ['بدأوا شغل', (r) => r.started], ['سابوا في أقل من 7 أيام', (r) => `<b style="color:var(--red)">${r.quit_within_7}</b>`],
+        ['النسبة', (r) => `${r.started ? Math.round((r.quit_within_7 / r.started) * 100) : 0}%`]])}
+    <div class="card" style="margin-top:12px"><div class="ph" style="margin-bottom:6px"><h3 style="margin:0">⏰ ترشيحات مستنية مراجعة</h3>${stale ? '<button class="btn sec sm" data-stale-all>افتح في المناديب</button>' : ''}</div>
+      <p class="small muted" style="margin:0">${stale ? `فيه <b>${stale}</b> ترشيح حالته "تحت المراجعة" من أكتر من 48 ساعة. التأخير بيخلّي الشركاء يزهقوا.` : 'كل الترشيحات اتراجعت في وقتها ✅'}</p></div>`);
+  const sa = $('[data-stale-all]'); if (sa) sa.onclick = () => { S.courSt = 'submitted'; go('couriers'); };
 }
 
 // ------------------------------------------------------------------ jobs

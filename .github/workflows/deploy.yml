@@ -21,7 +21,7 @@ jobs:
       - name: Stage site files
         run: |
           mkdir -p dist
-          cp -r index.html app.css app.js sw.js manifest.webmanifest _headers admin shared logos brand dist/
+          cp -r index.html app.css app.js join.html join.js sw.js manifest.webmanifest _headers admin shared logos brand dist/
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
