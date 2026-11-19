@@ -120,3 +120,15 @@ td .acts{display:flex;gap:4px;flex-wrap:wrap}
   .cp-back{display:inline-flex}
   .bub{max-width:88%}
 }
+
+/* ---- Job location picker ---- */
+.jloc{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fafbfc}
+.jloc-h{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.jloc-st{font-size:12px;font-weight:800;padding:2px 10px;border-radius:99px;background:#f1f5f9;color:var(--ink2)}
+.jloc-st.pin{background:var(--g-soft);color:var(--g2)}
+.jloc-st.approx{background:var(--amber-soft);color:var(--amber)}
+.jloc-map{height:240px;border-radius:12px;overflow:hidden;direction:ltr;background:#e9eef2;position:relative;z-index:0}
+.jloc-map .leaflet-container{font-family:inherit}
+.jloc-ph{display:grid;place-items:center;height:100%;color:var(--mute);font-size:13px;direction:rtl}
+.jloc-act{margin-top:8px;gap:8px}
+@media(max-width:520px){.jloc-map{height:210px}}

@@ -3,6 +3,7 @@ import {
   sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, logoSrc, toast, modal, errMsg, busy,
   GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip,
 } from './shared/common.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './shared/config.js';
 
 const S = { summary: null, companies: [], rules: [], jobs: null, cands: null, ledger: null, view: 'home', cStatus: '', walletTab: 'earn' };
 const T0 = performance.now();
@@ -277,6 +278,98 @@ $('#regForm').onsubmit = async (e) => {
   });
 };
 
+// ------------------------------------------------------------------ passkeys (fingerprint / face)
+const FN = `${SUPABASE_URL}/functions/v1`;
+const pkSupported = async () => {
+  try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch { return false; }
+};
+let swaP = null;
+const swa = () => swaP || (swaP = import('https://esm.sh/@simplewebauthn/browser@13.1.0').catch((e) => { swaP = null; throw e; }));
+async function pkCall(action, extra = {}, auth = false) {
+  const headers = { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY };
+  if (auth) { const { data } = await sb.auth.getSession(); headers.Authorization = 'Bearer ' + data.session?.access_token; }
+  const r = await fetch(`${FN}/passkey`, { method: 'POST', headers, body: JSON.stringify({ action, ...extra }) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || 'server');
+  return out;
+}
+const deviceName = () => { const u = navigator.userAgent; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? (u.match(/Android[^;]*;\s*([^;)]+)/)?.[1] || 'Android').trim() : /Mac/.test(u) ? 'Mac' : /Windows/.test(u) ? 'Windows' : 'جهاز'; };
+async function registerPasskey() {
+  const { startRegistration } = await swa();
+  const { options, cid } = await pkCall('register-options', { label: '0' + (S.summary?.freelancer?.mobile || '') }, true);
+  const response = await startRegistration({ optionsJSON: options });
+  await pkCall('register-verify', { cid, response, device: deviceName() }, true);
+  store.set(ukey('pk-offer'), 1);
+}
+async function loginWithPasskey(btn) {
+  const old = btn.innerHTML; btn.disabled = true; btn.textContent = 'بنستنى البصمة...';
+  try {
+    const { startAuthentication } = await swa();
+    const { options, cid } = await pkCall('login-options');
+    const response = await startAuthentication({ optionsJSON: options });
+    const { token_hash } = await pkCall('login-verify', { cid, response });
+    const { error } = await sb.auth.verifyOtp({ token_hash, type: 'magiclink' });
+    if (error) throw error;
+    buzz(20); await boot();
+  } catch (e) {
+    if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') return;
+    toast(e?.message === 'unknown_passkey' ? 'البصمة دي مش متسجلة — ادخل بكلمة المرور وفعّلها من "حسابي".' : 'مقدرناش ندخلك بالبصمة، ادخل بكلمة المرور.', 'bad');
+  } finally { btn.disabled = false; btn.innerHTML = old; }
+}
+pkSupported().then((ok) => { if (ok) { const b = $('#pkLogin'); b.hidden = false; b.onclick = () => loginWithPasskey(b); } });
+async function maybeOfferPasskey() {
+  if (store.get(ukey('pk-offer'), 0) || !(await pkSupported())) return;
+  const { count } = await sb.from('passkeys').select('id', { count: 'exact', head: true });
+  if (count) { store.set(ukey('pk-offer'), 1); return; }
+  const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">🔐</div><div><h2>ادخل بالبصمة المرة الجاية؟</h2><p>من غير كلمة مرور — بصمة إيدك أو وشك وخلاص</p></div></div>
+    <div class="sheet-actions"><button class="btn sec" data-no>مش دلوقتي</button><button class="btn pri grow" data-yes>فعّل البصمة</button></div>`);
+  $('[data-no]', m.el).onclick = () => { store.set(ukey('pk-offer'), 1); m.close(); };
+  $('[data-yes]', m.el).onclick = async (e) => {
+    await busy(e.currentTarget, async () => {
+      try { await registerPasskey(); m.close(); confetti(); toast('تم تفعيل الدخول بالبصمة 🎉', 'ok'); }
+      catch (err) { if (err?.name !== 'NotAllowedError') toast('مقدرناش نفعّل البصمة على الجهاز ده', 'bad'); }
+    });
+  };
+}
+
+// ------------------------------------------------------------------ web push
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const b64ToU8 = (b) => { const p = '='.repeat((4 - (b.length % 4)) % 4), r = atob((b + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
+async function currentPushSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
+async function enablePush() {
+  if (isIOS && !standalone()) throw new Error('ios_install');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('denied');
+  const { publicKey } = await fetch(`${FN}/push`, { headers: { apikey: SUPABASE_ANON_KEY } }).then((r) => r.json());
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(publicKey) });
+  const j = sub.toJSON();
+  const { error } = await sb.rpc('save_push_subscription', { p: { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, ua: navigator.userAgent.slice(0, 200) } });
+  if (error) throw error;
+}
+async function disablePush() {
+  const sub = await currentPushSub(); if (!sub) return;
+  await sb.rpc('remove_push_subscription', { p_endpoint: sub.endpoint });
+  await sub.unsubscribe().catch(() => {});
+}
+const pushErr = (e) => ({ ios_install: 'على الآيفون لازم تثبّت التطبيق على الشاشة الرئيسية الأول (زرار المشاركة ← إضافة إلى الشاشة الرئيسية)، وبعدين فعّل الإشعارات من جوه.',
+  denied: 'الإشعارات مقفولة للموقع ده — افتحها من إعدادات المتصفح وجرّب تاني.' }[e?.message] || 'مقدرناش نفعّل الإشعارات على الجهاز ده.');
+function pushCard() {
+  if (!pushSupported() || Notification.permission !== 'default' || store.get(ukey('push-x'), 0)) return '';
+  return `<div class="install push-card rise" id="pushCard"><span class="rc-ic">🔔</span>
+    <div class="grow"><b>اعرف أول ما مندوبك يتعيّن</b><span>فعّل الإشعارات وهتوصلك على الموبايل حتى والتطبيق مقفول</span></div>
+    <button class="btn pri sm" data-push-on>فعّل</button><button class="x" data-push-x aria-label="إخفاء">×</button></div>`;
+}
+function bindPushCard() {
+  const c = $('#pushCard'); if (!c) return;
+  $('[data-push-x]', c).onclick = () => { store.set(ukey('push-x'), 1); c.remove(); };
+  $('[data-push-on]', c).onclick = async (e) => {
+    await busy(e.currentTarget, async () => {
+      try { await enablePush(); c.remove(); confetti(); toast('الإشعارات اشتغلت 🔔', 'ok'); } catch (err) { toast(pushErr(err), 'bad'); }
+    });
+  };
+}
+
 const logout = async () => { await sb.auth.signOut(); location.reload(); };
 $$('[data-logout]').forEach((b) => b.onclick = logout);
 $('#waitRefresh').onclick = () => boot();
@@ -310,8 +403,11 @@ async function boot() {
   ]);
   S.companies = c.data ?? []; S.rules = r.data ?? [];
   S.jobs = S.cands = S.ledger = null;
+  const want = new URLSearchParams(location.search).get('go');
+  if (['home', 'jobs', 'couriers', 'wallet', 'me', 'chat'].includes(want)) { S.view = want; history.replaceState(null, '', location.pathname); }
   go(S.view);
   maybeTour();
+  setTimeout(maybeOfferPasskey, 2500);
 }
 function updateLevelChip() {
   const lv = level(S.summary?.counts?.hired || 0);
@@ -569,6 +665,7 @@ async function home() {
       </span>
     </button>
     ${installCard()}
+    ${pushCard()}
     ${S.summary.freelancer.ref_code ? `<button class="refcard rise" style="--i:2" data-ref>
       <span class="rc-ic">🔗</span><span class="grow"><b>لينكك الشخصي + QR</b><span>ابعته للمناديب يسجّلوا بنفسهم ويتحسبوا ليك</span></span><span class="rc-go">${IC.chev}</span></button>` : ''}
 
@@ -631,6 +728,7 @@ async function home() {
   });
   bindJobActions($('#view'));
   bindInstall();
+  bindPushCard();
   $('[data-ref]')?.addEventListener('click', refSheet);
   $$('.pl').forEach((b) => b.onclick = () => { buzz(8); S.jobCo = b.dataset.co; go('jobs'); });
 }
@@ -673,7 +771,8 @@ async function jobs() {
   const coCount = (id) => S.jobs.filter((j) => String(j.company_id) === id).length;
   const VIEWS = [['cards', svg('<rect x="4" y="3" width="16" height="8" rx="2"/><rect x="4" y="13" width="16" height="8" rx="2"/>'), 'بطاقات'],
     ['list', svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'), 'قائمة'],
-    ['group', svg('<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'), 'حسب الشركة']];
+    ['group', svg('<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'), 'حسب الشركة'],
+    ['map', svg('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/>'), 'خريطة']];
   view(`
     <div class="page-h"><div><h2>الوظائف المتاحة</h2><p>${S.jobs.length} وظيفة — رشّح عليها واكسب بونص</p></div>
       <div class="vt" role="group" aria-label="شكل العرض">${VIEWS.map(([v, ic, t]) => `<button data-view="${v}" class="${S.jobView === v ? 'on' : ''}" aria-label="${t}" title="${t}">${ic}</button>`).join('')}</div></div>
@@ -688,6 +787,7 @@ async function jobs() {
       <button class="pill on" data-v="">كل الوظايف</button>
       ${nNew ? `<button class="pill" data-v="new">✨ الجديدة <em>${nNew}</em></button>` : ''}
       ${nMine ? `<button class="pill" data-v="mine">📍 في ${esc(myGov)} <em>${nMine}</em></button>` : ''}
+      <button class="pill" data-v="near">📍 الأقرب ليا</button>
       <button class="pill" data-v="fav">❤️ المفضلة <em data-favn>${S.jobs.filter((j) => JOBCTX.fav.has(String(j.id))).length}</em></button>
     </div>
     ${govs.length > 1 ? `<div class="pills" data-f="gov"><button class="pill on" data-v="">كل المحافظات</button>${govs.map((g) => `<button class="pill" data-v="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
@@ -703,13 +803,26 @@ async function jobs() {
       (st.only !== 'new' || jobIsNew(j, JOBCTX.seen)) && (st.only !== 'mine' || j.gov === myGov) &&
       (st.only !== 'fav' || JOBCTX.fav.has(String(j.id))) &&
       (!q || [j.company, j.title, j.gov, j.region, j.pricing].join(' ').toLowerCase().includes(q)));
+    if (st.only === 'near' && !JOBCTX.me) {
+      if (!JOBCTX.locating) {
+        JOBCTX.locating = true;
+        locate().then((pos) => { JOBCTX.me = pos; buzz(10); }).catch(() => {
+          toast('مقدرناش نعرف مكانك — اسمح للتطبيق يوصل للموقع من إعدادات المتصفح', 'bad');
+          st.only = ''; $$('[data-f=only] .pill').forEach((x) => x.classList.toggle('on', !x.dataset.v));
+        }).finally(() => { JOBCTX.locating = false; render(); });
+      }
+      $('#jobList').innerHTML = '<div class="empty-s"><span class="e-ic">📍</span><b>بنحدد مكانك...</b><p>عشان نرتّبلك أقرب الوظايف ليك</p></div>';
+      return;
+    }
+    if (st.only === 'near' && JOBCTX.me) list.sort((a, b) => (a.lat ? distKm(JOBCTX.me, a) : 1e9) - (b.lat ? distKm(JOBCTX.me, b) : 1e9));
     const box = $('#jobList');
     const coName = st.co && S.companies.find((c) => String(c.id) === st.co)?.name;
     box.className = 'list jv-' + S.jobView;
     const fkey = JSON.stringify([st, S.jobView]);
     if (fkey !== JOBCTX.fkey) { JOBCTX.fkey = fkey; JOBCTX.shown = 20; }
-    box.innerHTML = list.length ? renderJobs(list.slice(0, JOBCTX.shown))
-        + (list.length > JOBCTX.shown ? `<button class="btn sec block" data-more>اعرض وظايف أكتر (فاضل ${list.length - JOBCTX.shown})</button>` : '')
+    const paged = S.jobView === 'map' ? list : list.slice(0, JOBCTX.shown);
+    box.innerHTML = list.length ? renderJobs(paged)
+        + (S.jobView !== 'map' && list.length > JOBCTX.shown ? `<button class="btn sec block" data-more>اعرض وظايف أكتر (فاضل ${list.length - JOBCTX.shown})</button>` : '')
       : st.only === 'fav' ? empty('🤍', 'لسه مفيش وظايف مفضلة', 'دوس على القلب في أي وظيفة عشان تلاقيها هنا بسرعة.')
         : coName && !coCount(st.co) ? empty('🏢', `مفيش وظايف متاحة لـ ${coName} دلوقتي`, 'أول ما تنزل وظيفة جديدة ليها هتلاقيها هنا.', 'شوف كل الوظايف')
           : empty('🔍', 'مفيش وظائف مطابقة', 'جرّب تغيّر الفلتر أو تمسح البحث.');
@@ -718,6 +831,7 @@ async function jobs() {
     const cta = $('[data-empty-cta]', box);
     if (cta) cta.onclick = () => { st.co = ''; $$('[data-f=co] .pill').forEach((p) => p.classList.toggle('on', !p.dataset.v)); render(); };
     bindJobActions(box); animateIn(box);
+    if (S.jobView === 'map' && list.length) drawMap(list);
     bindFav(box, () => { $('[data-favn]').textContent = S.jobs.filter((j) => JOBCTX.fav.has(String(j.id))).length; if (st.only === 'fav') render(); });
   };
   store.set(ukey('seen'), new Date().toISOString());
@@ -735,7 +849,57 @@ async function jobs() {
   render();
   $('[data-f=co] .pill.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
+// ------------------------------------------------------------------ location + map
+function locate() {
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) return rej(new Error('nogeo'));
+    navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lng: p.coords.longitude }), rej, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+  });
+}
+function distKm(a, b) {
+  const R = 6371, r = (x) => (x * Math.PI) / 180, dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const fmtKm = (d) => (d < 1 ? `${Math.round(d * 1000)} متر` : `${d < 10 ? d.toFixed(1) : Math.round(d)} كم`);
+function distTag(j) {
+  if (!JOBCTX.me || j.lat == null) return '';
+  return `<span class="tag dist">📍 ${fmtKm(distKm(JOBCTX.me, j))}${j.geo_precision === 'pin' ? '' : ' تقريباً'}</span>`;
+}
+let leafletP = null;
+const loadLeaflet = () => leafletP || (leafletP = new Promise((res, rej) => {
+  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(l);
+  const sc = document.createElement('script'); sc.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  sc.onload = () => res(window.L); sc.onerror = () => { leafletP = null; rej(new Error('leaflet')); }; document.head.appendChild(sc);
+}));
+async function drawMap(list) {
+  const el = $('#jmap'); if (!el) return;
+  let L; try { L = await loadLeaflet(); } catch { el.innerHTML = '<p class="muted" style="padding:20px;text-align:center">مقدرناش نحمّل الخريطة، جرّب تاني.</p>'; return; }
+  if (!document.body.contains(el)) return;
+  el.innerHTML = '';
+  const map = L.map(el, { zoomControl: true }).setView([30.05, 31.25], 10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+  const pts = [];
+  const placed = list.filter((j) => j.lat != null && j.lng != null);
+  placed.forEach((j) => {
+    const h = hue(String(j.id)), spread = j.geo_precision === 'pin' ? 0 : 0.012;
+    const ll = [j.lat + ((h % 97) / 97 - 0.5) * spread, j.lng + (((h * 7) % 89) / 89 - 0.5) * spread];
+    const m = L.circleMarker(ll, { radius: 9, color: '#fff', weight: 2, fillColor: `hsl(${hue(j.company)} 70% 45%)`, fillOpacity: 0.95 }).addTo(map);
+    m.bindPopup(`<div class="mpop"><b>${esc(j.title)}</b><span>${esc(j.company)} · ${esc(j.region || j.gov || '')}</span>${j.pricing ? `<em>💰 ${esc(j.pricing)}</em>` : ''}${JOBCTX.me ? `<em>📍 ${fmtKm(distKm(JOBCTX.me, j))}</em>` : ''}${j.geo_precision === 'pin' ? '' : '<small>مكان تقريبي</small>'}<button class="btn pri sm" data-apply="${esc(j.id)}">رشّح مندوب</button></div>`);
+    m.on('popupopen', (e) => { const b = e.popup.getElement().querySelector('[data-apply]'); if (b) b.onclick = () => { map.closePopup(); addCourier(findJob(b.dataset.apply)); }; });
+    pts.push(ll);
+  });
+  if (JOBCTX.me) {
+    L.circleMarker([JOBCTX.me.lat, JOBCTX.me.lng], { radius: 9, color: '#fff', weight: 3, fillColor: '#1aa9ec', fillOpacity: 1 }).addTo(map).bindTooltip('انت هنا');
+    pts.push([JOBCTX.me.lat, JOBCTX.me.lng]);
+  }
+  if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
+  const miss = list.length - placed.length;
+  const note = $('.map-note'); if (note) note.textContent = miss ? `${miss} وظيفة لسه ملهاش مكان على الخريطة` : 'الأماكن اللي مكتوب عليها "تقريبي" محسوبة من اسم المنطقة';
+  setTimeout(() => map.invalidateSize(), 250);
+}
 function renderJobs(list) {
+  if (S.jobView === 'map') return '<div class="jmap-wrap"><div id="jmap" class="jmap"><div class="spin"></div></div><p class="map-note"></p></div>';
   if (S.jobView === 'list') return list.map(jobRow).join('');
   if (S.jobView === 'group') {
     const groups = new Map();
@@ -756,6 +920,7 @@ function jobRow(j, i) {
     ${jobLogo(j)}
     <div class="grow"><b>${esc(j.title)}${isNew ? ' <span class="new-tag">جديد</span>' : ''}</b>
       <span>${esc(j.company)} · ${esc(j.gov || '—')}${j.region ? ' — ' + esc(j.region) : ''}</span>
+      ${distTag(j) ? `<span class="jr-t">${distTag(j)}</span>` : ''}
       <span class="jr-t">${j.vehicle ? `${VEH_EMOJI[j.vehicle] || ''} ${esc(j.vehicle)}` : ''}${j.pricing ? ` · ${esc(j.pricing)}` : ''}</span></div>
     <div class="jr-end">${max ? `<span class="jr-bonus">🎁 ${money(max)}</span>` : ''}<button class="ibtn add" data-apply="${esc(j.id)}" aria-label="رشّح مندوب على ${esc(j.title)}">${IC.plus}</button></div>
   </article>`;
@@ -776,7 +941,7 @@ function bindFav(root, after) {
     after?.();
   });
 }
-const JOBCTX = { seen: null, fav: new Set(), shown: 20, fkey: '' };
+const JOBCTX = { seen: null, fav: new Set(), shown: 20, fkey: '', me: null, locating: false };
 const HEART = svg('<path d="M12 20s-7.5-4.6-9.3-9.2C1.4 7.4 3.6 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8C19.5 15.4 12 20 12 20Z"/>');
 function jobCard(j, i) {
   const id = String(j.id), fav = JOBCTX.fav.has(id), isNew = jobIsNew(j, JOBCTX.seen);
@@ -793,6 +958,7 @@ function jobCard(j, i) {
       ${j.work_type ? `<span class="tag">${esc(j.work_type)}</span>` : ''}
       ${j.age ? `<span class="tag">السن ${esc(j.age)}</span>` : ''}
       ${j.expiry ? `<span class="tag warn">${IC.clock} لحد ${fmtDate(j.expiry)}</span>` : ''}
+      ${distTag(j)}
     </div>
     <div class="jc-money">
       <div class="pay"><span>التسعيرة للمندوب</span><b>${esc(j.pricing || '—')}</b></div>
@@ -1179,6 +1345,34 @@ function badgesOf() {
     ['🏢', '3 شركات مختلفة', p(comps, 3)], ['🚀', '25 ترشيح', p(tot, 25)], ['👑', '15 مندوب شغال', p(hired, 15)],
   ];
 }
+async function refreshSecurity() {
+  if (!$('#secCard')) return;
+  const pkOk = await pkSupported(), pkBtn = $('#pkBtn'), list = $('#pkList');
+  const { data: keys } = await sb.from('passkeys').select('id,device,created_at,last_used_at').order('created_at');
+  if (!$('#secCard')) return;
+  $('#pkState').textContent = !pkOk ? 'الجهاز ده مش بيدعم البصمة للمواقع' : keys?.length ? `مفعّلة على ${keys.length} ${keys.length === 1 ? 'جهاز' : 'أجهزة'}` : 'مش مفعّلة';
+  pkBtn.hidden = !pkOk; pkBtn.textContent = keys?.length ? '+ الجهاز ده' : 'فعّل';
+  list.innerHTML = (keys || []).map((k) => `<div class="pk-item"><span>📱 ${esc(k.device || 'جهاز')}</span><em>${k.last_used_at ? 'آخر دخول ' + fmtDate(k.last_used_at) : 'اتفعّلت ' + fmtDate(k.created_at)}</em><button class="link" data-pk-del="${esc(k.id)}">شيل</button></div>`).join('');
+  pkBtn.onclick = async () => {
+    await busy(pkBtn, async () => {
+      try { await registerPasskey(); confetti(); toast('تم تفعيل الدخول بالبصمة 🎉', 'ok'); } catch (e) { if (e?.name !== 'NotAllowedError') toast(e?.message === 'unauthorized' ? 'سجّل خروج ودخول تاني وجرّب' : 'مقدرناش نفعّل البصمة — ممكن تكون متفعّلة قبل كده على الجهاز ده', 'bad'); }
+    });
+    refreshSecurity();
+  };
+  $$('[data-pk-del]', list).forEach((b) => b.onclick = async () => { await sb.rpc('remove_my_passkey', { p_id: b.dataset.pkDel }); toast('اتشالت'); refreshSecurity(); });
+  const pushBtn = $('#pushBtn'), sub = pushSupported() ? await currentPushSub().catch(() => null) : null;
+  if (!$('#secCard')) return;
+  $('#pushState').textContent = !pushSupported() ? (isIOS && !standalone() ? 'ثبّت التطبيق على الشاشة الرئيسية الأول' : 'المتصفح ده مش بيدعم الإشعارات')
+    : Notification.permission === 'denied' ? 'مقفولة من إعدادات المتصفح' : sub ? 'مفعّلة على الجهاز ده ✓' : 'مش مفعّلة';
+  pushBtn.hidden = !pushSupported() || Notification.permission === 'denied';
+  pushBtn.textContent = sub ? 'إيقاف' : 'فعّل';
+  pushBtn.onclick = async () => {
+    await busy(pushBtn, async () => {
+      try { if (sub) { await disablePush(); toast('الإشعارات اتقفلت'); } else { await enablePush(); confetti(); toast('الإشعارات اشتغلت 🔔', 'ok'); } } catch (e) { toast(pushErr(e), 'bad'); }
+    });
+    refreshSecurity();
+  };
+}
 async function me() {
   if (!S.cands) { loading(); await loadCands().catch(() => {}); }
   const f = S.summary.freelancer, n = S.summary.counts || {}, lv = level(n.hired || 0);
@@ -1223,6 +1417,12 @@ async function me() {
         <button class="btn sec">تغيير كلمة المرور</button>
       </form>
     </section>
+    <section class="card rise" style="--i:2;margin-top:14px" id="secCard">
+      <h3>🔐 الدخول والإشعارات</h3>
+      <div class="set-row"><div class="grow"><b>الدخول بالبصمة أو الوش</b><span id="pkState">بنشوف...</span></div><button class="btn sec sm" id="pkBtn" hidden>فعّل</button></div>
+      <div class="pk-list" id="pkList"></div>
+      <div class="set-row"><div class="grow"><b>إشعارات الموبايل</b><span id="pushState">بنشوف...</span></div><button class="btn sec sm" id="pushBtn" hidden>فعّل</button></div>
+    </section>
     <section class="card rise" style="--i:3;margin-top:14px">
       <h3>🌓 المظهر</h3>
       <div class="theme-seg">${[['', '📱 تلقائي'], ['light', '☀️ فاتح'], ['dark', '🌙 غامق']].map(([v, t]) => `<button class="pill ${(store.get('fsf-theme', '') || '') === v ? 'on' : ''}" data-theme-set="${v}">${t}</button>`).join('')}</div>
@@ -1231,6 +1431,7 @@ async function me() {
     <button class="btn out block rise" style="--i:4;margin-top:10px" data-logout>${IC.logout} تسجيل الخروج</button>`);
   $('#view [data-logout]').onclick = logout;
   $('#view [data-tour]').onclick = () => maybeTour(true);
+  refreshSecurity();
   $('#view [data-ref]')?.addEventListener('click', refSheet);
   $('#view [data-chat]').onclick = () => go('chat');
   $$('[data-theme-set]').forEach((b) => b.onclick = () => {

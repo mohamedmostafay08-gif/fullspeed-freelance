@@ -838,6 +838,62 @@ async function jobs() {
   render();
 }
 
+let leafletP = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletP) return leafletP;
+  leafletP = new Promise((res, rej) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => res(window.L); s.onerror = () => { leafletP = null; rej(new Error('leaflet')); };
+    document.head.appendChild(s);
+  });
+  return leafletP;
+}
+const LOC_TXT = { pin: 'مكان دقيق (دبوس)', region: 'مكان تقريبي (المنطقة)', gov: 'مكان تقريبي (المحافظة)' };
+async function setupJobMap(root, f, loc) {
+  const st = $('[data-locst]', root), box = $('[data-map]', root);
+  const paint = () => { st.textContent = loc.lat == null ? 'مفيش مكان' : LOC_TXT[loc.prec] || LOC_TXT.pin; st.className = 'jloc-st ' + (loc.lat == null ? 'none' : loc.prec === 'pin' ? 'pin' : 'approx'); };
+  paint();
+  let L, map, marker = null;
+  try { L = await loadLeaflet(); } catch { box.innerHTML = '<div class="jloc-ph">مقدرناش نحمّل الخريطة — جرّب تاني.</div>'; return; }
+  if (!root.isConnected) return;
+  box.innerHTML = '';
+  map = L.map(box, { zoomControl: true }).setView(loc.lat != null ? [loc.lat, loc.lng] : [30.0444, 31.2357], loc.lat != null ? 14 : 10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  const place = (lat, lng, prec, fly) => {
+    loc.lat = lat; loc.lng = lng; loc.prec = prec;
+    if (!marker) {
+      marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+      marker.on('dragend', () => { const p = marker.getLatLng(); place(p.lat, p.lng, 'pin'); });
+    } else marker.setLatLng([lat, lng]);
+    if (fly) map.setView([lat, lng], Math.max(map.getZoom(), 14));
+    paint();
+  };
+  if (loc.lat != null) place(loc.lat, loc.lng, loc.prec);
+  map.on('click', (e) => place(e.latlng.lat, e.latlng.lng, 'pin'));
+  setTimeout(() => map.invalidateSize(), 60);
+  setTimeout(() => map.invalidateSize(), 400);
+  $('[data-geo]', root).onclick = async (e) => {
+    const b = e.currentTarget, region = f.region.value.trim(), gov = f.gov.value;
+    if (!region && !gov) return toast('اكتب المنطقة الأول', 'bad');
+    b.disabled = true; const old = b.textContent; b.textContent = 'بندوّر...';
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'eg', q: [region, gov, 'مصر'].filter(Boolean).join('، ') });
+      const r = await fetch(url, { headers: { 'Accept-Language': 'ar' } }).then((x) => x.json());
+      if (r?.[0]) place(Number(r[0].lat), Number(r[0].lon), 'region', true);
+      else toast('ملقيناش المنطقة دي — حط الدبوس بإيدك', 'bad');
+    } catch { toast('مقدرناش ندوّر دلوقتي', 'bad'); }
+    finally { b.disabled = false; b.textContent = old; }
+  };
+  $('[data-clearloc]', root).onclick = () => {
+    loc.lat = loc.lng = loc.prec = null;
+    if (marker) { map.removeLayer(marker); marker = null; }
+    paint();
+  };
+}
+
 function jobEdit(j, isCopy) {
   const DOCS = ['بطاقة سارية', 'رخصة قيادة', 'رخصة مركبة', 'فيش جنائي', 'شهادة ميلاد', 'شهادة جيش'];
   const has = (d) => String(j?.docs || '').includes(d);
@@ -866,10 +922,21 @@ function jobEdit(j, isCopy) {
       </div>
       <div><label class="f">الورق المطلوب</label><div class="row">${DOCS.map((d) => `<label class="small row" style="gap:4px"><input type="checkbox" name="doc" value="${d}" ${has(d) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
       <div><label class="f">التفاصيل</label><textarea class="in" name="details">${esc(j?.details || '')}</textarea></div>
+      <div class="jloc">
+        <div class="jloc-h"><label class="f" style="margin:0">📍 مكان الوظيفة على الخريطة</label><span class="jloc-st" data-locst></span></div>
+        <div class="jloc-map" data-map><div class="jloc-ph">بنحمّل الخريطة...</div></div>
+        <div class="row jloc-act">
+          <button type="button" class="btn sec sm" data-geo>🔎 دوّر على المنطقة</button>
+          <button type="button" class="btn ghost sm" data-clearloc>شيل المكان</button>
+          <span class="small muted">دوس على الخريطة عشان تحط دبوس، وتقدر تسحبه.</span>
+        </div>
+      </div>
       <div class="err" data-err></div>
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri">${j && !isCopy ? 'حفظ' : 'نشر'}</button></div>
     </form>`, 'wide');
   const f = $('form', m.el);
+  const loc = { lat: j?.lat ?? null, lng: j?.lng ?? null, prec: j?.lat != null ? (j.geo_precision || 'pin') : null };
+  setupJobMap(m.el, f, loc);
   f.company.onchange = () => { if (!f.bonus.value) { const c = S.companies.find((x) => x.id === f.company.value); if (c) f.bonus.value = `${c.full_amount} ج.م بعد ${c.target_days} يوم`; } };
   f.onsubmit = async (e) => {
     e.preventDefault();
@@ -879,6 +946,7 @@ function jobEdit(j, isCopy) {
       work_type: f.type.value, vehicle: f.vehicle.value, pricing: f.pricing.value.trim(), bonus_text: f.bonus.value.trim() || (c ? `${c.full_amount} ج.م بعد ${c.target_days} يوم` : ''),
       headcount: f.hc.value ? Number(f.hc.value) : null, expiry: f.expiry.value || null, status: f.status.value,
       docs: $$('[name=doc]:checked', f).map((x) => x.value).join('، '), details: f.details.value.trim(),
+      lat: loc.lat, lng: loc.lng, geo_precision: loc.lat == null ? null : loc.prec,
     };
     await busy($('button.pri', f), async () => {
       const q = j && !isCopy ? sb.from('jobs').update(rec).eq('id', j.id) : sb.from('jobs').insert({ ...rec, created_by: (await sb.auth.getUser()).data.user.id });

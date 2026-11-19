@@ -1,0 +1,50 @@
+name: Daily database backup
+
+on:
+  schedule:
+    - cron: '17 0 * * *'   # 02:17 Cairo
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DB_URL" ] || [ -z "$PASS" ]; then
+            echo "::error::Add SUPABASE_DB_URL and BACKUP_PASSPHRASE in repo Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump and encrypt
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          stamp=$(TZ=Africa/Cairo date +%Y-%m-%d_%H%M)
+          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" -Fc --no-owner --no-privileges -n public -n auth -n storage -f "fsp-$stamp.dump"
+          ls -lh "fsp-$stamp.dump"
+          gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$PASS" -o "fsp-$stamp.dump.gpg" "fsp-$stamp.dump"
+          rm "fsp-$stamp.dump"
+          echo "FILE=fsp-$stamp.dump.gpg" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE }}
+          path: ${{ env.FILE }}
+          retention-days: 30
+          if-no-files-found: error
