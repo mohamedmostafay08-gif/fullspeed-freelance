@@ -392,7 +392,7 @@ async function chat() {
 }
 
 // ------------------------------------------------------------------ personal referral link + QR
-const refLink = () => `${location.origin}/join.html?r=${encodeURIComponent(S.summary.freelancer.ref_code || '')}`;
+const refLink = () => `${location.origin}/join?r=${encodeURIComponent(S.summary.freelancer.ref_code || '')}`;
 let qrLib = null;
 const loadQR = () => qrLib || (qrLib = new Promise((res, rej) => {
   const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
