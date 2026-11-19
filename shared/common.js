@@ -118,6 +118,9 @@ const ERR = {
   only_updates: 'الرجوع متاح للتعديلات بس (مش الإضافة أو المسح).',
   table_not_allowed: 'الرجوع مش متاح للنوع ده من البيانات (فلوس أو صلاحيات).',
   owner_has_all: 'المالك ليه كل الصلاحيات دايماً.',
+  'User is banned': 'الحساب ده موقوف. كلّم الإدارة.',
+  no_login: 'الشريك ده ملوش دخول لسه — اعمله باسوورد الأول.',
+  invalid_mobile: 'رقم الموبايل مش صحيح.',
 };
 export function errMsg(e) {
   const m = String(e?.message ?? e?.error ?? e ?? '');

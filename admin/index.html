@@ -4,12 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#eef3f0">
+  <script>try{var d=document.documentElement,t=localStorage.getItem('fsa-theme')||'system';d.dataset.themePref=t;d.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;if(localStorage.getItem('fsa-lang')==='en'){d.lang='en';d.dir='ltr'}}catch(e){}</script>
   <title>Full Speed — لوحة الإدارة</title>
   <link rel="icon" type="image/png" href="../brand/fs-icon-512.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="../shared/common.css">
   <link rel="stylesheet" href="admin.css">
 </head>
 <body>
+  <div class="auth-tools" id="authTools"></div>
   <section id="auth" class="auth hidden">
     <div class="card" style="width:100%;max-width:400px;padding:22px">
       <div class="brand" style="justify-content:center;margin-bottom:12px"><div class="logo fs"><img src="../brand/fs-mark.png" alt="Full Speed"></div><div><b>Full Speed</b><span>ADMIN CONTROL PANEL</span></div></div>
@@ -38,7 +43,7 @@
         <div class="row" style="margin-top:6px"><button class="btn sec sm" id="myPw">كلمة المرور</button><button class="btn ghost sm" data-logout>خروج</button></div>
         <div id="pushCtl" class="push-ctl"></div></div>
     </aside>
-    <main class="main"><div id="view"></div></main>
+    <main class="main"><header class="topbar" id="topbar"></header><div id="view"></div></main>
   </section>
 
   <script type="module" src="admin.js"></script>

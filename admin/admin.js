@@ -4,6 +4,11 @@ import {
   fetchAll, csvDownload, GOVS, VEHICLES, CAND_STATUS, WD_STATUS, FL_STATUS, chip,
 } from '../shared/common.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../shared/config.js';
+import { initI18n, isEn } from './i18n.js';
+import { mountTopbar, mountAuthTools, applyTheme } from './topbar.js';
+
+applyTheme();
+initI18n();
 
 // Report uncaught admin errors to client_errors (max 5 per page load).
 let errSent = 0;
@@ -50,12 +55,15 @@ const NAV = [
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 const S = {
-  me: null, perms: null, view: 'dash', companies: [], fl: [], flMap: new Map(), poll: null, courSt: '',
+  me: null, perms: null, view: (() => { try { const v = sessionStorage.getItem('fsa-view'); sessionStorage.removeItem('fsa-view'); return v && v !== 'profile' ? v : 'dash'; } catch (_) { return 'dash'; } })(), companies: [], fl: [], flMap: new Map(), poll: null, courSt: '',
   settings: {}, profileId: null, profTab: 'cands', courMode: lsGet('fsa-cour-mode') === 'board' ? 'board' : 'table', kbOpen: false,
 };
 // Server-side permissions (my_perms) win; the role table is only a fallback if the RPC is unavailable.
 const can = (p) => (S.perms ?? ROLE_PERMS[S.me?.role] ?? []).includes(p);
-const show = (id) => ['auth', 'noaccess', 'app'].forEach((x) => $('#' + x).classList.toggle('hidden', x !== id));
+const show = (id) => {
+  ['auth', 'noaccess', 'app'].forEach((x) => $('#' + x).classList.toggle('hidden', x !== id));
+  const at = $('#authTools'); if (at) { at.hidden = id === 'app'; if (id !== 'app' && !at.childElementCount) mountAuthTools(at, () => S.view); }
+};
 const view = (h) => { $('#view').innerHTML = h; };
 const loading = () => view('<div class="spin"></div>');
 const fnCall = async (body) => {
@@ -97,6 +105,7 @@ async function boot() {
   $('#nav').innerHTML = NAV.filter((n) => n[2] === 'owneronly' ? S.me?.role === 'owner' : can(n[2])).map((n) => `<button data-go="${n[0]}"><span class="ico">${ICONS[n[0]] || ''}</span><span class="lbl">${n[1]}</span><span class="badge hidden" data-badge="${n[0]}"></span></button>`).join('');
   $$('#nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
   show('app');
+  mountTopbar($('#topbar'), { me: st, getView: () => S.view });
   renderPushCtl();
   await loadBase();
   go(S.view);
@@ -104,7 +113,7 @@ async function boot() {
 async function loadBase() {
   const [c, f] = await Promise.all([
     sb.from('companies').select('*').order('name'),
-    fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes,frozen_at,frozen_reason,ref_code').order('created_at', { ascending: false })),
+    fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes,frozen_at,frozen_reason,ref_code,status_reason').order('created_at', { ascending: false })),
   ]);
   S.companies = c.data ?? []; S.fl = f; S.flMap = new Map(f.map((x) => [x.id, x]));
   const { count } = await sb.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
@@ -169,11 +178,11 @@ async function chatBadge() {
   bc.textContent = count || ''; bc.classList.toggle('hidden', !count);
 }
 function go(v, arg) {
-  const views = { dash, master, partners, profile, couriers, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
+  const views = { dash, master, partners, profile, couriers, courier, jobform, withdrawals, chat, broadcast, companies, jobs, fraud, staff, settings, errors, audit };
   if (!views[v]) v = 'dash';
   S.view = v;
   if (S.poll) { clearInterval(S.poll); S.poll = null; }
-  $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === (v === 'profile' ? 'partners' : v)));
+  $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === (v === 'profile' ? 'partners' : v === 'courier' ? 'couriers' : v === 'jobform' ? 'jobs' : v)));
   loading();
   // On phones the menu sits above the content, so land on the page itself rather than the top of the menu.
   if (matchMedia('(max-width: 900px)').matches) $('.main')?.scrollIntoView({ block: 'start' }); else scrollTo(0, 0);
@@ -218,7 +227,7 @@ async function dash() {
   const topFl = prim.map((f) => ({ f, e: Number(balMap.get(f.id)?.total_earned || 0) })).sort((a, b) => b.e - a.e).slice(0, 8);
   const maxF = Math.max(1, ...topFl.map((x) => x.e));
   view(`
-    <div class="ph"><h1>لوحة المؤشرات</h1><span class="small muted">${new Date().toLocaleString('ar-EG')}</span></div>
+    <div class="ph"><h1>لوحة المؤشرات</h1></div>
     <div class="grid4">
       <div class="card kpi b"><div class="lbl">إجمالي الشركاء</div><div class="val">${prim.length}</div><div class="small muted">مفعّل ${cnt(prim, 'status', 'Active')} • انتظار ${cnt(prim, 'status', 'Pending')}</div></div>
       <div class="card kpi g"><div class="lbl">مناديب اتعيّنوا</div><div class="val">${cnt(cands, 'status', 'hired')}</div><div class="small muted">من ${cands.length} ترشيح (${cands.length ? Math.round(cnt(cands, 'status', 'hired') / cands.length * 100) : 0}%)</div></div>
@@ -284,9 +293,11 @@ function staleHtml(cands) {
 
 // ------------------------------------------------------------------ partners
 async function partners() {
+  S.logins = null;
   const [bal, cands] = await Promise.all([
     fetchAll(() => sb.from('freelancer_balances').select('*')),
     fetchAll(() => sb.from('candidates').select('freelancer_id,status')),
+    loginInfo(''),
   ]);
   const bMap = new Map(bal.map((b) => [b.freelancer_id, b]));
   const cc = {};
@@ -300,8 +311,11 @@ async function partners() {
       <select class="in" data-gov><option value="">كل المحافظات</option>${[...new Set(S.fl.map((f) => f.gov).filter(Boolean))].map((g) => `<option>${esc(g)}</option>`).join('')}</select>
     </div>
     <div class="bulk hidden" data-bulk>تم تحديد <span data-n></span>
-      <select class="in" style="width:auto" data-bst>${Object.entries(FL_STATUS).map(([k, [t]]) => `<option value="${k}">${t}</option>`).join('')}</select>
-      <button class="btn pri sm" data-bapply>تطبيق الحالة</button><button class="btn ghost sm" data-bclear>إلغاء التحديد</button></div>
+      <select class="in" style="width:auto" data-bst>${Object.entries(FL_STATUS).filter(([k]) => k !== 'Inactive').map(([k, [t]]) => `<option value="${k}">${t}</option>`).join('')}</select>
+      <button class="btn pri sm" data-bapply>تطبيق الحالة</button>
+      <button class="btn dan sm" data-bsus>⛔ إيقاف</button><button class="btn sec sm" data-bact>✅ تفعيل</button>
+      <button class="btn sec sm" data-bout>🚪 خروج من الأجهزة</button><button class="btn sec sm" data-bmsg>💬 رسالة</button>
+      <button class="btn ghost sm" data-bclear>إلغاء التحديد</button></div>
     <div id="tbl"></div>`);
   let rows = [];
   const render = () => {
@@ -317,13 +331,15 @@ async function partners() {
       ['المنطقة', (f) => `${esc(f.gov || '')}<div class="small muted">${esc(f.region || '')}</div>`],
       ['المناديب', (f) => `<span class="chip p">${cc[f.id]?.h ?? 0} / ${cc[f.id]?.t ?? 0}</span>`],
       ['الرصيد', (f) => `<b>${money(bMap.get(f.id)?.balance)}</b><div class="small muted">كسب ${money(bMap.get(f.id)?.total_earned)}</div>`],
-      ['الحالة', (f) => chip(FL_STATUS, f.status)],
-      ['', (f) => `<div class="acts"><button class="btn sec sm" data-det="${f.id}">الملف</button>${can('partners') ? `<button class="btn sec sm" data-ed="${f.id}">تعديل</button>` : ''}</div>`],
+      ['الحالة', (f) => chip(FL_STATUS, f.status) + (f.status === 'Inactive' && f.status_reason ? `<div class="small muted" title="${esc(f.status_reason)}">${esc(f.status_reason.slice(0, 24))}</div>` : '')],
+      ['آخر دخول', (f) => { const li = S.logins?.get(f.id); return li?.last_sign_in_at ? `<span class="small" title="${new Date(li.last_sign_in_at).toLocaleString('en-GB')}">${fmtDate(li.last_sign_in_at)}</span>${li.sessions ? ` <span class="chip g" title="أجهزة فاتحة">📱${li.sessions}</span>` : ''}` : '<span class="small muted">—</span>'; }],
+      ['', (f) => `<div class="acts"><button class="btn sec sm" data-det="${f.id}">الملف</button>${can('partners') && !f.duplicate_of ? `<button class="btn sec sm" data-ctl="${f.id}" title="إيقاف، باسوورد، أجهزة">🛡️ تحكم</button><button class="btn sec sm" data-ed="${f.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((c) => c.onchange = () => { c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); bulkBar(); });
       const all = $('[data-all]', h); if (all) all.onchange = () => { rows.filter((f) => !f.duplicate_of).forEach((f) => all.checked ? sel.add(f.id) : sel.delete(f.id)); render(); bulkBar(); };
       $$('[data-det]', h).forEach((b) => b.onclick = () => openProfile(b.dataset.det));
       $$('[data-ed]', h).forEach((b) => b.onclick = () => partnerEdit(S.flMap.get(b.dataset.ed)));
+      $$('[data-ctl]', h).forEach((b) => b.onclick = () => partnerControl(S.flMap.get(b.dataset.ctl)));
     } });
   };
   const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('partners')); $('[data-n]').textContent = sel.size; };
@@ -332,9 +348,45 @@ async function partners() {
     const st = $('[data-bst]').value;
     if (!(await confirmBox('تغيير حالة جماعي', `هيتغير ${sel.size} شريك لحالة "${FL_STATUS[st][0]}".`, 'تطبيق', false))) return;
     await busy(e.target, async () => {
-      const { error } = await sb.from('freelancers').update({ status: st }).in('id', [...sel]);
+      // Suspended accounts are also blocked from logging in; they come back only through "تفعيل".
+      const ids = [...sel].filter((id) => S.flMap.get(id)?.status !== 'Inactive');
+      if (ids.length < sel.size) toast(`${sel.size - ids.length} موقوفين اتسابوا — استخدم "تفعيل" ليهم`, 'bad');
+      if (!ids.length) return;
+      const { error } = await sb.from('freelancers').update({ status: st }).in('id', ids);
       if (error) return toast(errMsg(error), 'bad');
       toast('تم ✅', 'ok'); sel.clear(); await loadBase(); go('partners');
+    });
+  };
+  // Bulk account actions run one partner at a time through the server function and report how many worked.
+  const bulkRun = async (btn, label, ids, body) => busy(btn, async () => {
+    let ok = 0; const bad = [];
+    for (const id of ids) {
+      try { await fnCall({ ...body, freelancer_id: id }); ok++; } catch (e) { bad.push(`${flName(id)}: ${errMsg(e)}`); }
+    }
+    toast(`${label}: ${ok} من ${ids.length}${bad.length ? ` — فشل: ${bad.slice(0, 3).join('، ')}` : ''}`, bad.length ? 'bad' : 'ok');
+    sel.clear(); S.logins = null; await loadBase(); go('partners');
+  });
+  $('[data-bsus]').onclick = async (e) => {
+    const ids = [...sel].filter((id) => S.flMap.get(id)?.status !== 'Inactive'); if (!ids.length) return toast('كلهم موقوفين أصلاً', 'bad');
+    const reason = await promptBox(`إيقاف ${ids.length} أكونت`, 'سبب الإيقاف (هيتسجل لكل واحد)'); if (!reason) return;
+    bulkRun(e.target, 'اتوقف', ids, { action: 'suspend_freelancer', reason });
+  };
+  $('[data-bact]').onclick = async (e) => {
+    const ids = [...sel].filter((id) => S.flMap.get(id)?.status === 'Inactive'); if (!ids.length) return toast('مفيش حد موقوف في المحددين', 'bad');
+    if (!(await confirmBox('تفعيل جماعي', `هيتفعّل ${ids.length} أكونت ويقدروا يدخلوا تاني.`, 'تفعيل', false))) return;
+    bulkRun(e.target, 'اتفعّل', ids, { action: 'activate_freelancer' });
+  };
+  $('[data-bout]').onclick = async (e) => {
+    const ids = [...sel].filter((id) => S.flMap.get(id)?.user_id); if (!ids.length) return;
+    if (!(await confirmBox('خروج من كل الأجهزة', `${ids.length} شريك هيتطلب منهم يسجّلوا دخول تاني.`, 'خروج'))) return;
+    bulkRun(e.target, 'خرجوا', ids, { action: 'sign_out_freelancer' });
+  };
+  $('[data-bmsg]').onclick = async (e) => {
+    const body = await promptBox(`رسالة لـ ${sel.size} شريك`, 'الرسالة (هتوصل في المحادثة + إشعار)'); if (!body) return;
+    await busy(e.target, async () => {
+      let ok = 0;
+      for (const id of sel) { const { error } = await sb.rpc('admin_send_message', { p_freelancer: id, p_body: body }); if (!error) ok++; }
+      toast(`اتبعتت لـ ${ok} من ${sel.size} 💬`, ok === sel.size ? 'ok' : 'bad'); sel.clear(); render(); bulkBar();
     });
   };
   $$('[data-q],[data-st],[data-gov]').forEach((el) => el.oninput = render);
@@ -432,7 +484,7 @@ async function profile() {
       <div class="prof-acts">
         <button class="btn sec sm" data-as title="بيفتح تطبيق الشريك للقراءة بس">👁️ شوف التطبيق بعينه</button>
         <button class="btn sec sm" data-stmt>🧾 كشف حساب شهري</button>
-        ${can('partners') ? `<button class="btn sec sm" data-msg>💬 رسالة</button><button class="btn sec sm" data-edit>✏️ تعديل</button>
+        ${can('partners') ? `<button class="btn sec sm" data-ctl>🛡️ التحكم في الحساب</button><button class="btn sec sm" data-msg>💬 رسالة</button><button class="btn sec sm" data-edit>✏️ تعديل</button>
           <button class="btn ${fz.frozen ? 'pri' : 'dan'} sm" data-fz>${fz.frozen ? '🔓 فك التجميد' : '🔒 تجميد الأرباح'}</button>` : ''}
       </div>
     </div>
@@ -516,6 +568,7 @@ async function profile() {
   $('[data-stmt]').onclick = () => statementModal(f, led, wds, candName);
   const on = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
   on('[data-msg]', () => go('chat', id));
+  on('[data-ctl]', () => partnerControl(f));
   on('[data-edit]', () => partnerEdit(f));
   on('[data-fz]', async (e) => {
     const btn = e.currentTarget;
@@ -560,7 +613,7 @@ function statementModal(f, led, wds, candName) {
     ].sort((a, b) => a.d.localeCompare(b.d));
     let run = opening;
     const totCr = rows.reduce((t, r) => t + r.cr, 0), totDb = rows.reduce((t, r) => t + r.db, 0);
-    const monthName = new Date(y, mo - 1, 1).toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+    const monthName = new Date(y, mo - 1, 1).toLocaleDateString(isEn ? 'en-GB' : 'ar-EG', { month: 'long', year: 'numeric' });
     $('[data-stmt]', m.el).innerHTML = `
       <div class="st-head"><img src="../brand/fs-logo.png" alt="Full Speed"><div><h2>كشف حساب شهري</h2><div class="muted">${esc(monthName)}</div></div></div>
       <div class="kv st-kv">
@@ -585,6 +638,87 @@ function statementModal(f, led, wds, candName) {
   draw();
 }
 
+// ------------------------------------------------------------------ partner account control (suspend / password / sign out)
+const genPassword = () => {
+  const a = 'abcdefghjkmnpqrstuvwxyz', d = '23456789', r = (s) => s[crypto.getRandomValues(new Uint32Array(1))[0] % s.length];
+  return Array.from({ length: 4 }, () => r(a)).join('') + Array.from({ length: 4 }, () => r(d)).join('');
+};
+async function loginInfo(id) {
+  if (!S.logins) {
+    const { data } = await sb.rpc('admin_partner_logins');
+    S.logins = new Map((data || []).map((x) => [x.freelancer_id, x]));
+  }
+  return S.logins.get(id);
+}
+async function partnerControl(f) {
+  const li = f.user_id ? await loginInfo(f.id) : null;
+  const off = f.status === 'Inactive';
+  const m = modal(`
+    <h2>🛡️ التحكم في حساب ${esc(f.name)}</h2>
+    <div class="ctl-grid">
+      <div class="ctl-card">
+        <div class="ctl-h">حالة الأكونت ${chip(FL_STATUS, f.status)}</div>
+        <div class="small muted">${off ? `موقوف${f.status_reason ? ` — ${esc(f.status_reason)}` : ''}. مش قادر يدخل التطبيق.` : 'الأكونت شغال ويقدر يدخل التطبيق.'}</div>
+        <button class="btn ${off ? 'pri' : 'dan'} sm" data-c="${off ? 'act' : 'sus'}">${off ? '✅ تفعيل الأكونت' : '⛔ إيقاف الأكونت'}</button>
+      </div>
+      <div class="ctl-card">
+        <div class="ctl-h">الدخول والأجهزة</div>
+        <div class="small muted">${!f.user_id ? 'ملوش دخول لسه.' : `آخر دخول: <b>${li?.last_sign_in_at ? new Date(li.last_sign_in_at).toLocaleString('en-GB') : '—'}</b><br>أجهزة فاتحة دلوقتي: <b>${li?.sessions ?? 0}</b>`}</div>
+        ${f.user_id ? '<button class="btn sec sm" data-c="out">🚪 خروج من كل الأجهزة</button>' : ''}
+      </div>
+      <div class="ctl-card wide">
+        <div class="ctl-h">${f.user_id ? 'تغيير الباسوورد' : 'إنشاء دخول للشريك'}</div>
+        <div class="row" style="gap:6px"><input class="in mono" data-pwv placeholder="الباسوورد الجديد (6 على الأقل)" style="flex:1;min-width:0">
+          <button class="btn sec sm" data-c="gen" type="button">🎲 ولّد</button></div>
+        ${f.user_id ? '<label class="small row" style="gap:6px"><input type="checkbox" data-pwout checked> خرّجه من الأجهزة التانية</label>' : ''}
+        <button class="btn pri sm" data-c="pw">💾 حفظ الباسوورد</button>
+        <div data-pwdone></div>
+      </div>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-top:14px">
+      <div class="row"><button class="btn sec sm" data-c="edit">✏️ تعديل البيانات</button><button class="btn sec sm" data-c="mob">📱 تغيير الموبايل</button></div>
+      <button class="btn ghost" data-close>قفل</button>
+    </div>`, 'wide');
+  const el = m.el, done = async (msg) => { toast(msg, 'ok'); S.logins = null; await loadBase(); };
+  const act = async (b, fn) => busy(b, async () => { try { await fn(); } catch (e) { toast(errMsg(e), 'bad'); } });
+  $$('[data-c]', el).forEach((b) => b.onclick = () => ({
+    sus: () => act(b, async () => {
+      const reason = await promptBox('إيقاف الأكونت', 'سبب الإيقاف (هيتسجل في السجل)'); if (!reason) return;
+      await fnCall({ action: 'suspend_freelancer', freelancer_id: f.id, reason });
+      m.close(); await done('الأكونت اتوقف وخرج من كل الأجهزة ⛔'); go(S.view);
+    }),
+    act: () => act(b, async () => {
+      if (!(await confirmBox('تفعيل الأكونت', `${f.name} هيقدر يدخل التطبيق تاني.`, 'تفعيل', false))) return;
+      await fnCall({ action: 'activate_freelancer', freelancer_id: f.id });
+      m.close(); await done('الأكونت اتفعّل ✅'); go(S.view);
+    }),
+    out: () => act(b, async () => {
+      if (!(await confirmBox('خروج من كل الأجهزة', 'هيتطلب منه يسجّل دخول تاني على كل الأجهزة.', 'خروج'))) return;
+      const r = await fnCall({ action: 'sign_out_freelancer', freelancer_id: f.id });
+      await done(`اتقفلت ${r.sessions ?? 0} جلسة 🚪`);
+    }),
+    gen: () => { $('[data-pwv]', el).value = genPassword(); },
+    pw: () => act(b, async () => {
+      const p = $('[data-pwv]', el).value.trim();
+      if (p.length < 6) return toast('الباسوورد 6 حروف/أرقام على الأقل', 'bad');
+      await fnCall(f.user_id
+        ? { action: 'reset_freelancer_password', freelancer_id: f.id, password: p, sign_out: $('[data-pwout]', el)?.checked !== false }
+        : { action: 'create_freelancer_login', freelancer_id: f.id, password: p });
+      const msg = `أهلاً ${f.name}، بيانات دخولك على تطبيق Full Speed Partners:\nالموبايل: 0${f.mobile}\nالباسوورد: ${p}\nhttps://fullspeed-freelance.pages.dev`;
+      $('[data-pwdone]', el).innerHTML = `<div class="ctl-ok">✅ اتحفظ. <a class="btn pri sm" target="_blank" rel="noopener" href="${waLink(f.mobile)}?text=${encodeURIComponent(msg)}">ابعتها واتساب</a>
+        <button class="btn sec sm" data-copy>نسخ</button></div>`;
+      $('[data-copy]', el).onclick = () => navigator.clipboard?.writeText(msg).then(() => toast('اتنسخت'), () => {});
+      await done('الباسوورد اتغيّر 🔑');
+    }),
+    edit: () => { m.close(); partnerEdit(f); },
+    mob: () => act(b, async () => {
+      const v = await promptBox('تغيير رقم الموبايل', 'الرقم الجديد (هيبقى هو اسم الدخول)', { placeholder: '01xxxxxxxxx' }); if (!v) return;
+      await fnCall({ action: 'change_freelancer_mobile', freelancer_id: f.id, mobile: v });
+      m.close(); await done('تم تغيير الموبايل ✅'); go(S.view);
+    }),
+  })[b.dataset.c]?.());
+}
+
 function partnerEdit(f) {
   const m = modal(`
     <h2>تعديل: ${esc(f.name)}</h2>
@@ -594,6 +728,8 @@ function partnerEdit(f) {
         <div><label class="f">الحالة</label><select class="in" name="status">${Object.entries(FL_STATUS).map(([k, [t]]) => `<option value="${k}" ${k === f.status ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       <div class="grid2"><div><label class="f">المحافظة</label><input class="in" name="gov" value="${esc(f.gov || '')}" list="govl"><datalist id="govl">${GOVS.map((g) => `<option>${g}</option>`).join('')}</datalist></div>
         <div><label class="f">المنطقة</label><input class="in" name="region" value="${esc(f.region || '')}"></div></div>
+      <div class="grid2"><div><label class="f">كود الإحالة</label><input class="in mono" name="ref_code" value="${esc(f.ref_code || '')}" maxlength="20" pattern="[A-Za-z0-9_-]{3,20}" title="3–20 حرف إنجليزي أو رقم"></div>
+        <div><label class="f">الموبايل (اسم الدخول)</label><input class="in mono" value="0${esc(f.mobile || '')}" disabled></div></div>
       <div><label class="f">ملاحظات داخلية</label><textarea class="in" name="notes">${esc(f.notes || '')}</textarea></div>
       <div class="err" data-err></div>
       <div class="row" style="justify-content:space-between">
@@ -603,17 +739,34 @@ function partnerEdit(f) {
         </div>
         <div class="row"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri">حفظ</button></div>
       </div>
-      <p class="small muted" style="margin:0">مفيش حذف للحسابات — لإيقاف حساب غيّر الحالة لـ "موقوف".</p>
+      <p class="small muted" style="margin:0">مفيش حذف للحسابات — لإيقاف حساب غيّر الحالة لـ "موقوف" (بيقفل الدخول ويخرّجه من كل الأجهزة).</p>
     </form>`);
   const fm = $('form', m.el);
   fm.onsubmit = async (e) => {
     e.preventDefault();
     await busy($('button.pri', fm), async () => {
-      const { error } = await sb.from('freelancers').update({
-        name: fm.name.value.trim(), email: fm.email.value.trim() || null, status: fm.status.value,
+      // Suspending / re-activating also blocks or restores the login, so it goes through the server function.
+      const want = fm.status.value, wasOff = f.status === 'Inactive';
+      let status = want;
+      if (want === 'Inactive' && !wasOff) {
+        const reason = await promptBox('إيقاف الأكونت', 'سبب الإيقاف (هيتسجل في السجل)'); if (!reason) return;
+        try { await fnCall({ action: 'suspend_freelancer', freelancer_id: f.id, reason }); } catch (e2) { return ($('[data-err]', fm).textContent = errMsg(e2)); }
+        status = undefined;
+      } else if (wasOff && want === 'Active') {
+        try { await fnCall({ action: 'activate_freelancer', freelancer_id: f.id }); } catch (e2) { return ($('[data-err]', fm).textContent = errMsg(e2)); }
+        status = undefined;
+      }
+      const patch = {
+        name: fm.name.value.trim(), email: fm.email.value.trim() || null,
         gov: fm.gov.value.trim(), region: fm.region.value.trim(), notes: fm.notes.value.trim() || null,
-      }).eq('id', f.id);
-      if (error) return ($('[data-err]', fm).textContent = errMsg(error).includes('duplicate') ? 'الإيميل ده مستخدم لشريك تاني' : errMsg(error));
+        ref_code: fm.ref_code.value.trim().toUpperCase() || null,
+      };
+      if (status) patch.status = status;
+      const { error } = await sb.from('freelancers').update(patch).eq('id', f.id);
+      if (error) {
+        const em = errMsg(error);
+        return ($('[data-err]', fm).textContent = em.includes('ref_code') ? 'كود الإحالة ده مستخدم لشريك تاني' : em.includes('duplicate') ? 'الإيميل ده مستخدم لشريك تاني' : em);
+      }
       m.close(); toast('تم الحفظ ✅', 'ok'); await loadBase(); go(S.view);
     });
   };
@@ -645,6 +798,9 @@ async function couriers() {
   const rulesR = await sb.from('bonus_rules').select('company_id,kind,min_days').eq('active', true);
   const tgt = {}; (rulesR.data || []).forEach((r) => { if (r.kind === 'days') tgt[r.company_id] = Math.max(tgt[r.company_id] || 0, r.min_days); });
   const sel = new Set();
+  const perFl = {}; cands.forEach((c) => { perFl[c.freelancer_id] = (perFl[c.freelancer_id] || 0) + 1; });
+  const partnerOpts = Object.entries(perFl).sort((a, b) => b[1] - a[1])
+    .map(([id, n]) => `<option value="${id}">${esc(flName(id))} (${n})</option>`).join('');
   view(`
     <div class="ph"><h1>المناديب</h1><div class="row"><div class="seg" role="group" aria-label="طريقة العرض"><button data-mode="table">📋 جدول</button><button data-mode="board">🗂️ لوحة المراحل</button></div><button class="btn sec sm" data-csv>⬇️ تقرير مالي Excel</button></div></div>
     <div class="grid4" style="margin-bottom:12px">
@@ -658,6 +814,8 @@ async function couriers() {
       <select class="in" data-st><option value="">كل الحالات</option>${Object.entries(CAND_STATUS).map(([k, [t]]) => `<option value="${k}">${t}</option>`).join('')}</select>
       <select class="in" data-co><option value="">كل الشركات</option>${S.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="NONE">بدون شركة مطابقة</option></select>
       <select class="in" data-due><option value="">كل الاستحقاقات</option><option value="paper">بونص ورق بس</option><option value="any">ليه أي بونص</option><option value="none">بدون بونص</option></select>
+      <select class="in" data-fl><option value="">كل الشركاء</option>${partnerOpts}</select>
+      <button class="btn sec sm" data-cols title="اختار العواميد اللي تظهر">🧩 العواميد</button>
     </div>
     <div class="bulk hidden" data-bulk>تم تحديد <span data-n></span> <button class="btn pri sm" data-bedit>تحديث جماعي</button><button class="btn ghost sm" data-bclear>إلغاء التحديد</button></div>
     <div id="tbl"></div><div id="board" class="hidden"></div>`);
@@ -666,39 +824,134 @@ async function couriers() {
     const board = S.courMode === 'board';
     $('#tbl').classList.toggle('hidden', board); $('#board').classList.toggle('hidden', !board); $('[data-st]').classList.toggle('hidden', board);
     $$('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === S.courMode));
-    const q = $('[data-q]').value.trim().toLowerCase(), st = board ? '' : $('[data-st]').value, co = $('[data-co]').value, due = $('[data-due]').value;
-    rows = cands.filter((c) => (!st || c.status === st) && (!co || (co === 'NONE' ? !c.company_id : c.company_id === co)) &&
+    const q = $('[data-q]').value.trim().toLowerCase(), st = board ? '' : $('[data-st]').value, co = $('[data-co]').value, due = $('[data-due]').value, fl = $('[data-fl]').value;
+    rows = cands.filter((c) => (!st || c.status === st) && (!fl || c.freelancer_id === fl) && (!co || (co === 'NONE' ? !c.company_id : c.company_id === co)) &&
       (!due || (due === 'any' ? earned[c.id] > 0 : due === 'none' ? !earned[c.id] : (c.paper_date && !c.start_date))) &&
       (!q || [c.name, c.code, c.mobile, '0' + c.mobile, flName(c.freelancer_id), S.flMap.get(c.freelancer_id)?.mobile].join(' ').toLowerCase().includes(q)));
     if (board) return drawBoard($('#board'), rows, render);
+    const days = (c) => c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : null;
+    const ALL = {
+      code: ['الكود', (c) => `<span class="mono small">${esc(c.code)}</span><div class="small muted">${fmtDate(c.created_at)}</div>`],
+      name: ['المندوب', (c) => `<button class="lnk" data-cour="${c.id}"><b>${esc(c.name)}</b></button><div class="small mono muted">0${esc(c.mobile)}</div>`],
+      partner: ['الشريك المرشّح', (c) => { const f = S.flMap.get(c.freelancer_id); return f ? `<button class="who" data-fl-open="${f.id}" title="افتح ملف الشريك"><span class="who-av">${esc((f.name || '؟').trim().slice(0, 1))}</span><span><b>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile || '')}</span></span></button>` : '<span class="muted">—</span>'; }],
+      company: ['الشركة / الوظيفة', (c) => `${esc(compName(c.company_id, c.company_name))}${c.job_id ? `<div class="small muted">${esc(jMap.get(c.job_id)?.title || '')} <span class="mono">${esc(jMap.get(c.job_id)?.code || '')}</span></div>` : ''}`],
+      area: ['المحافظة / المنطقة', (c) => `${esc(c.gov || '—')}<div class="small muted">${esc(c.region || '')}</div>`],
+      vehicle: ['المركبة', (c) => `<span class="small">${esc(c.vehicle || '—')}</span>`],
+      source: ['المصدر', (c) => `<span class="chip ${c.source === 'join' ? 'a' : 'n'}">${c.source === 'join' ? '🔗 لينك الإحالة' : '📱 التطبيق'}</span>`],
+      status: ['الحالة', (c) => chip(CAND_STATUS, c.status)],
+      days: ['الأيام', (c) => { const d = days(c); if (d == null) return '<span class="small muted">لم يبدأ</span>'; const t = tgt[c.company_id] || 26; return `<div class="small">${d} / ${t}${d >= t ? ' 🌟' : ''}</div><div class="bar"><i style="width:${Math.min(100, d / t * 100)}%"></i></div>`; }],
+      paper: ['الورق', (c) => c.paper_date ? `✅ <span class="small">${fmtDate(c.paper_date)}</span>` : '—'],
+      start: ['أول يوم شغل', (c) => `<span class="small">${fmtDate(c.start_date)}</span>`],
+      end: ['آخر يوم', (c) => `<span class="small">${fmtDate(c.end_date)}</span>`],
+      bonus: ['البونص', (c) => `<b>${money(earned[c.id])}</b>`],
+      updated: ['آخر تحديث', (c) => `<span class="small">${fmtDate(c.updated_at)}</span>`],
+      note: ['ملاحظة الإدارة', (c) => `<span class="small muted">${esc((c.admin_note || '').slice(0, 40))}</span>`],
+    };
+    const shown = courCols().filter((k) => ALL[k]);
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (c) => `<input type="checkbox" data-sel="${c.id}" ${sel.has(c.id) ? 'checked' : ''}>`],
-      ['الكود', (c) => `<span class="mono small">${esc(c.code)}</span><div class="small muted">${fmtDate(c.created_at)}</div>`],
-      ['المندوب', (c) => `<b>${esc(c.name)}</b><div class="small mono muted">0${esc(c.mobile)} • ${esc(c.vehicle || '')}</div>`],
-      ['الشركة / الوظيفة', (c) => `${esc(compName(c.company_id, c.company_name))}${c.job_id ? `<div class="small muted">${esc(jMap.get(c.job_id)?.code || '')}</div>` : ''}`],
-      ['الشريك', (c) => `${esc(flName(c.freelancer_id))}<div class="small mono muted">0${esc(S.flMap.get(c.freelancer_id)?.mobile || '')}</div>`],
-      ['الحالة', (c) => chip(CAND_STATUS, c.status)],
-      ['الأيام', (c) => { if (!c.start_date) return '<span class="small muted">لم يبدأ</span>'; const t = tgt[c.company_id] || 26; const d = daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()); return `<div class="small">${d} / ${t}${d >= t ? ' 🌟' : ''}</div><div class="bar"><i style="width:${Math.min(100, d / t * 100)}%"></i></div>`; }],
-      ['الورق', (c) => c.paper_date ? `✅ <span class="small">${fmtDate(c.paper_date)}</span>` : '—'],
-      ['البونص', (c) => `<b>${money(earned[c.id])}</b>`],
-      ['', (c) => `<div class="acts"><button class="btn sec sm" data-docs="${c.id}" title="ورق المندوب">📎 الورق</button>${can('couriers') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''}</div>`],
+      ...shown.map((k) => ALL[k]),
+      ['', (c) => `<div class="acts"><button class="btn sec sm" data-cour="${c.id}">التفاصيل</button><button class="btn sec sm" data-docs="${c.id}" title="ورق المندوب">📎 الورق</button>${can('couriers') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((x) => x.onchange = () => { x.checked ? sel.add(x.dataset.sel) : sel.delete(x.dataset.sel); bulkBar(); });
       const all = $('[data-all]', h); if (all) all.onchange = () => { rows.forEach((c) => all.checked ? sel.add(c.id) : sel.delete(c.id)); render(); bulkBar(); };
       $$('[data-ed]', h).forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.ed)]));
       $$('[data-docs]', h).forEach((b) => b.onclick = () => docsModal(cands.find((c) => c.id === b.dataset.docs)));
+      $$('[data-cour]', h).forEach((b) => b.onclick = () => openCourier(b.dataset.cour));
+      $$('[data-fl-open]', h).forEach((b) => b.onclick = () => openProfile(b.dataset.flOpen));
     } });
   };
+  $('[data-cols]').onclick = () => {
+    const ALL_T = { code: 'الكود', name: 'المندوب', partner: 'الشريك المرشّح', company: 'الشركة / الوظيفة', area: 'المحافظة / المنطقة', vehicle: 'المركبة', source: 'المصدر', status: 'الحالة', days: 'الأيام', paper: 'الورق', start: 'أول يوم شغل', end: 'آخر يوم', bonus: 'البونص', updated: 'آخر تحديث', note: 'ملاحظة الإدارة' };
+    const cur = new Set(courCols());
+    const m = modal(`<h2>🧩 العواميد اللي تظهر</h2><div class="cols-pick">${Object.entries(ALL_T).map(([k, t]) => `<label><input type="checkbox" value="${k}" ${cur.has(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+      <div class="row" style="justify-content:space-between;margin-top:14px"><button class="btn ghost sm" data-def>↺ الافتراضي</button><div class="row"><button class="btn sec" data-close>إلغاء</button><button class="btn pri" data-ok>حفظ</button></div></div>`);
+    $('[data-def]', m.el).onclick = () => { lsSet('fsa-cour-cols', ''); m.close(); render(); };
+    $('[data-ok]', m.el).onclick = () => { lsSet('fsa-cour-cols', JSON.stringify($$('input:checked', m.el).map((x) => x.value))); m.close(); render(); };
+  };
+  if (S.courFl) { $('[data-fl]').value = S.courFl; S.courFl = ''; }
   if (S.courSt) { $('[data-st]').value = S.courSt; S.courSt = ''; }
   const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('couriers') || S.courMode === 'board'); $('[data-n]').textContent = sel.size; };
   $$('[data-mode]').forEach((b) => b.onclick = () => { S.courMode = b.dataset.mode; lsSet('fsa-cour-mode', S.courMode); render(); bulkBar(); });
   $('[data-bclear]').onclick = () => { sel.clear(); render(); bulkBar(); };
   $('[data-bedit]').onclick = () => courierEdit(cands.filter((c) => sel.has(c.id)));
-  $$('[data-q],[data-st],[data-co],[data-due]').forEach((el) => el.oninput = render);
+  $$('[data-q],[data-st],[data-co],[data-due],[data-fl]').forEach((el) => el.oninput = render);
   $('[data-csv]').onclick = () => csvDownload('FullSpeed_Couriers_Financial.csv',
     ['الكود', 'المندوب', 'موبايل المندوب', 'الشركة', 'الشريك', 'موبايل الشريك', 'الحالة', 'تاريخ الورق', 'أول يوم شغل', 'آخر يوم', 'البونص المستحق'],
     rows.map((c) => [c.code, c.name, '0' + c.mobile, compName(c.company_id, c.company_name), flName(c.freelancer_id), '0' + (S.flMap.get(c.freelancer_id)?.mobile || ''), CAND_STATUS[c.status]?.[0], c.paper_date, c.start_date, c.end_date, earned[c.id] || 0]));
   render(); bulkBar();
+}
+
+const COUR_DEFAULT = ['code', 'name', 'partner', 'company', 'area', 'status', 'days', 'paper', 'bonus'];
+const courCols = () => { try { const v = JSON.parse(lsGet('fsa-cour-cols') || 'null'); return Array.isArray(v) && v.length ? v : COUR_DEFAULT; } catch (_) { return COUR_DEFAULT; } };
+function openCourier(id) { S.courierId = id; go('courier'); }
+const SRC_AR = { partner: '📱 من تطبيق الشريك', join: '🔗 سجّل بنفسه من لينك الإحالة' };
+async function courier() {
+  const id = S.courierId;
+  const [cR, lR, aR] = await Promise.all([
+    sb.from('candidates').select('*').eq('id', id).maybeSingle(),
+    sb.from('bonus_ledger').select('*').eq('candidate_id', id).order('earned_on'),
+    can('audit') || can('view') ? sb.from('audit_log').select('*').eq('record_id', id).order('at').limit(200) : Promise.resolve({ data: [] }),
+  ]);
+  if (cR.error) throw cR.error;
+  const c = cR.data; if (!c) { S.view = 'couriers'; return couriers(); }
+  const f = S.flMap.get(c.freelancer_id);
+  const job = c.job_id ? (await sb.from('jobs').select('*').eq('id', c.job_id).maybeSingle()).data : null;
+  const rules = (await sb.from('bonus_rules').select('kind,min_days,amount').eq('company_id', c.company_id).eq('active', true)).data || [];
+  const led = lR.data || [], aud = aR.data || [];
+  const target = Math.max(26, ...rules.filter((r) => r.kind === 'days').map((r) => r.min_days));
+  const d = c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : 0;
+  const earnedSum = led.filter((x) => !x.reversed_at).reduce((a, x) => a + Number(x.amount), 0);
+  // Timeline: key dates from the record itself + every status change found in the audit log.
+  const ev = [{ at: c.created_at, t: 'اترشّح', s: `بواسطة ${f?.name || '—'}`, ic: '📝' }];
+  aud.forEach((a) => {
+    const b = a.before || {}, n = a.after || {};
+    if (a.action === 'update' && b.status !== n.status && n.status) ev.push({ at: a.at, t: `الحالة: ${CAND_STATUS[n.status]?.[0] || n.status}`, s: `${CAND_STATUS[b.status]?.[0] || b.status || ''} ← • ${a.actor_email || 'system'}`, ic: '🔁' });
+  });
+  if (c.paper_date) ev.push({ at: c.paper_date, t: 'خلّص الورق', ic: '📎' });
+  if (c.start_date) ev.push({ at: c.start_date, t: 'أول يوم شغل', ic: '🚀' });
+  led.forEach((x) => ev.push({ at: x.earned_on, t: `${ledKind(x)}: ${money(x.amount)}`, s: x.reversed_at ? `ملغي — ${x.reverse_reason || ''}` : '', ic: x.reversed_at ? '↩️' : '💰' }));
+  if (c.end_date) ev.push({ at: c.end_date, t: 'آخر يوم شغل', ic: '🏁' });
+  ev.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const kv = (k, v) => `<div><span class="muted small">${k}</span><b>${v || '—'}</b></div>`;
+  view(`
+    <div class="ph"><button class="btn ghost sm" data-back>→ رجوع للمناديب</button></div>
+    <div class="card prof-h">
+      <div class="prof-av">${esc(c.name.trim().slice(0, 1) || '؟')}</div>
+      <div class="prof-id">
+        <h1>${esc(c.name)} ${chip(CAND_STATUS, c.status)}</h1>
+        <div class="small muted prof-meta"><span class="mono">${esc(c.code)}</span><a class="mono" href="${waLink(c.mobile)}" target="_blank" rel="noopener">0${esc(c.mobile)}</a><span>${esc([c.gov, c.region].filter(Boolean).join(' — '))}</span><span>${esc(c.vehicle || '')}</span></div>
+      </div>
+      <div class="prof-acts"><button class="btn sec sm" data-docs>📎 الورق</button>${can('couriers') ? '<button class="btn pri sm" data-edit>✏️ تعديل</button>' : ''}</div>
+    </div>
+    <div class="grid4" style="margin-top:12px">
+      <div class="card kpi b"><div class="lbl">أيام الشغل</div><div class="val">${d} / ${target}</div><div class="bar"><i style="width:${Math.min(100, d / target * 100)}%"></i></div></div>
+      <div class="card kpi g"><div class="lbl">البونص المستحق للشريك</div><div class="val">${money(earnedSum)}</div></div>
+      <div class="card kpi a"><div class="lbl">الورق</div><div class="val" style="font-size:18px">${c.paper_date ? '✅ ' + fmtDate(c.paper_date) : 'لسه'}</div></div>
+      <div class="card kpi p"><div class="lbl">مصدر الترشيح</div><div class="val" style="font-size:15px">${SRC_AR[c.source] || esc(c.source || '—')}</div></div>
+    </div>
+    <div class="grid2 cour-grid" style="margin-top:12px">
+      <div class="card">
+        <h3 style="margin-top:0">👤 الشريك اللي رشّحه</h3>
+        ${f ? `<button class="who big" data-fl-open="${f.id}"><span class="who-av">${esc(f.name.trim().slice(0, 1))}</span><span><b>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile)} • ${esc(f.gov || '')}</span></span></button>
+          <div class="row" style="margin-top:8px"><button class="btn sec sm" data-fl-cands>كل مناديبه</button><a class="btn sec sm" target="_blank" rel="noopener" href="${waLink(f.mobile)}">واتساب الشريك</a></div>` : '—'}
+        <h3>🏢 الشركة والوظيفة</h3>
+        <div class="kv">${kv('الشركة', esc(compName(c.company_id, c.company_name)))}${kv('الوظيفة', esc(job ? `${job.title || ''} (${job.code})` : ''))}${kv('مكان الوظيفة', esc(job ? [job.gov, job.region].filter(Boolean).join(' — ') : ''))}${kv('بونص الوظيفة', esc(job?.bonus_text || ''))}</div>
+        <h3>📋 البيانات</h3>
+        <div class="kv">${kv('تاريخ الترشيح', fmtDate(c.created_at))}${kv('أول يوم شغل', fmtDate(c.start_date))}${kv('آخر يوم', fmtDate(c.end_date))}${kv('آخر تحديث', fmtDate(c.updated_at))}</div>
+        ${c.admin_note ? `<p class="small" style="margin-top:10px">📝 ${esc(c.admin_note)}</p>` : ''}
+        ${rules.length ? `<h3>💰 شرايح البونص</h3><div class="row" style="flex-wrap:wrap;gap:6px">${rules.sort((a, b) => (a.min_days || 0) - (b.min_days || 0)).map((r) => `<span class="chip ${r.kind === 'paper' ? 'a' : (d >= r.min_days ? 'g' : 'n')}">${r.kind === 'paper' ? 'ورق' : r.min_days + ' يوم'}: ${money(r.amount)}</span>`).join('')}</div>` : ''}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">🕒 التايم لاين</h3>
+        <ol class="tl">${ev.map((e) => `<li><span class="tl-ic">${e.ic}</span><div><b>${esc(e.t)}</b>${e.s ? `<div class="small muted">${esc(e.s)}</div>` : ''}<div class="small muted mono">${String(e.at).length > 10 ? new Date(e.at).toLocaleString('en-GB') : fmtDate(e.at)}</div></div></li>`).join('')}</ol>
+      </div>
+    </div>`);
+  $('[data-back]').onclick = () => go('couriers');
+  $('[data-docs]').onclick = () => docsModal(c);
+  const ed = $('[data-edit]'); if (ed) ed.onclick = () => courierEdit([c]);
+  $$('[data-fl-open]').forEach((b) => b.onclick = () => openProfile(b.dataset.flOpen));
+  const fc = $('[data-fl-cands]'); if (fc) fc.onclick = () => { S.courFl = c.freelancer_id; go('couriers'); };
 }
 
 function courierEdit(list) {
@@ -961,7 +1214,7 @@ function companyEdit(c, rules) {
       ${c ? `<label class="row small"><input type="checkbox" name="active" ${c.active ? 'checked' : ''}> الشركة مفعّلة (بتظهر في الترشيح)</label>` : `
       <div class="grid2"><div><label class="f">البونص الكامل</label><input class="in" type="number" name="full" value="1000" min="0"></div><div><label class="f">بعد كام يوم</label><input class="in" type="number" name="days" value="26" min="1"></div></div>
       <p class="small muted" style="margin:0">هيتعمل تلقائي: ورق 100، 7 أيام 200، 15 يوم 500، والبونص الكامل. تقدر تعدلهم بعد الحفظ.</p>`}
-      ${c ? `<div class="card" style="background:#f8fafc"><h3>قواعد البونص</h3>
+      ${c ? `<div class="card" style="background:var(--surface2)"><h3>قواعد البونص</h3>
         <div class="row"><label class="f" style="margin:0">بونص استكمال الورق</label><input class="in" type="number" min="0" name="paper" value="${paper?.amount ?? 0}" style="width:130px"></div>
         <p class="small muted">الشريك بياخد مبلغ <b>أعلى شريحة</b> المندوب وصلها (مش مجموعهم). آخر شريحة = البونص الكامل.</p>
         <div class="stack" data-tiers>${tiers.map(tierRow).join('')}</div>
@@ -1269,65 +1522,102 @@ async function setupJobMap(root, f, loc) {
   };
 }
 
-function jobEdit(j, isCopy) {
-  const DOCS = ['بطاقة سارية', 'رخصة قيادة', 'رخصة مركبة', 'فيش جنائي', 'شهادة ميلاد', 'شهادة جيش'];
+// Job form is a full page (matches the layout the team uses when posting a job).
+function jobEdit(j, isCopy) { S.jobForm = { j: j || null, isCopy: !!isCopy }; go('jobform'); }
+const HC_OPTS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100];
+const bonusLabel = (r) => r.kind === 'paper' ? `${Number(r.amount).toLocaleString('en-US')} ج.م (بعد الورق)` : `${Number(r.amount).toLocaleString('en-US')} ج.م (${r.min_days} يوم)`;
+async function jobform() {
+  const { j, isCopy } = S.jobForm || {};
+  const editing = j && !isCopy;
+  const DOCS = ['شهادة ميلاد', 'رخصة قيادة', 'شهادة جيش', 'فيش جنائي', 'بطاقة سارية', 'رخصة مركبة'];
   const has = (d) => String(j?.docs || '').includes(d);
-  const m = modal(`
-    <h2>${j && !isCopy ? 'تعديل وظيفة ' + esc(j.code) : 'نشر وظيفة جديدة'}</h2>
-    <form class="stack">
-      <div class="grid3">
-        <div><label class="f">الشركة</label><select class="in" name="company" required><option value="">اختار...</option>${S.companies.filter((c) => c.active || c.id === j?.company_id).map((c) => `<option value="${c.id}" ${j?.company_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
-        <div><label class="f">المسمى الوظيفي</label><input class="in" name="title" value="${esc(j?.title || 'مندوب توصيل')}" required></div>
-        <div><label class="f">السن</label><input class="in" name="age" value="${esc(j?.age || '')}" placeholder="من 21 لـ 40"></div>
+  const rulesR = await sb.from('bonus_rules').select('company_id,kind,min_days,amount').eq('active', true).order('min_days');
+  const rules = rulesR.data || [];
+  const bonusOpts = (cid, cur) => {
+    const c = S.companies.find((x) => x.id === cid);
+    const list = rules.filter((r) => r.company_id === cid).map(bonusLabel);
+    if (c?.full_amount && !list.length) list.push(`${Number(c.full_amount).toLocaleString('en-US')} ج.م (${c.target_days || 26} يوم)`);
+    if (cur && !list.includes(cur)) list.unshift(cur);
+    if (!list.length) return '<option value="">— اختار الشركة الأول —</option>';
+    // Default to the highest tier (what the partner gets for a courier who completes the target).
+    const pick = cur || list[list.length - 1];
+    return list.map((t) => `<option ${t === pick ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  };
+  const hc = j?.headcount ?? null, hcOther = hc != null && !HC_OPTS.includes(hc);
+  view(`
+    <div class="ph"><button class="btn ghost sm" data-back>→ رجوع للوظايف</button></div>
+    <div class="card jf">
+      <div class="jf-h">
+        <h2>${editing ? '✏️ تعديل وظيفة ' + esc(j.code) : '➕ إضافة وظيفة شاغرة جديدة'}</h2>
+        <span class="small muted">${editing ? 'التعديل بيظهر للشركاء على طول' : 'تسمع تلقائياً في تطبيق الفريلانسرز فور النشر'}</span>
       </div>
-      <div class="grid3">
-        <div><label class="f">المحافظة</label><select class="in" name="gov">${GOVS.map((g) => `<option ${j?.gov === g ? 'selected' : ''}>${g}</option>`).join('')}${j?.gov && !GOVS.includes(j.gov) ? `<option selected>${esc(j.gov)}</option>` : ''}</select></div>
-        <div><label class="f">المنطقة</label><input class="in" name="region" value="${esc(j?.region || '')}" required></div>
-        <div><label class="f">نوع الدوام</label><select class="in" name="type">${['دوام كامل (Full-Time)', 'بارت تايم (Part-Time)', 'شفتات متغيرة (Shifts)', 'عمل حر (Freelance)'].map((t) => `<option ${j?.work_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      </div>
-      <div class="grid3">
-        <div><label class="f">المركبة</label><select class="in" name="vehicle">${VEHICLES.map((v) => `<option ${j?.vehicle === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-        <div><label class="f">التسعيرة للمندوب</label><input class="in" name="pricing" value="${esc(j?.pricing || '')}" required></div>
-        <div><label class="f">نص البونص للشريك</label><input class="in" name="bonus" value="${esc(j?.bonus_text || '')}" placeholder="يتملي من الشركة لو فاضي"></div>
-      </div>
-      <div class="grid3">
-        <div><label class="f">العدد المطلوب (فاضي = مفتوح)</label><input class="in" type="number" min="1" name="hc" value="${j?.headcount ?? ''}"></div>
-        <div><label class="f">تاريخ الانتهاء</label><input class="in" type="date" name="expiry" value="${j?.expiry || ''}"></div>
-        <div><label class="f">الحالة</label><select class="in" name="status"><option value="Active" ${j?.status !== 'Inactive' ? 'selected' : ''}>نشطة</option><option value="Inactive" ${j?.status === 'Inactive' ? 'selected' : ''}>متوقفة</option></select></div>
-      </div>
-      <div><label class="f">الورق المطلوب</label><div class="row">${DOCS.map((d) => `<label class="small row" style="gap:4px"><input type="checkbox" name="doc" value="${d}" ${has(d) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
-      <div><label class="f">التفاصيل</label><textarea class="in" name="details">${esc(j?.details || '')}</textarea></div>
-      <div class="jloc">
-        <div class="jloc-h"><label class="f" style="margin:0">📍 مكان الوظيفة على الخريطة</label><span class="jloc-st" data-locst></span></div>
-        <div class="jloc-map" data-map><div class="jloc-ph">بنحمّل الخريطة...</div></div>
-        <div class="row jloc-act">
-          <button type="button" class="btn sec sm" data-geo>🔎 دوّر على المنطقة</button>
-          <button type="button" class="btn ghost sm" data-clearloc>شيل المكان</button>
-          <span class="small muted">دوس على الخريطة عشان تحط دبوس، وتقدر تسحبه.</span>
+      <form class="stack" autocomplete="off">
+        <div class="grid3">
+          <div><label class="f">الشركة (من الشيت)</label><select class="in" name="company" required><option value="">اختار الشركة...</option>${S.companies.filter((c) => c.active || c.id === j?.company_id).map((c) => `<option value="${c.id}" ${j?.company_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+          <div><label class="f">المسمى الوظيفي / المهنة</label><input class="in" name="title" value="${esc(j?.title || '')}" placeholder="مثال: مندوب توصيل" required></div>
+          <div><label class="f">السن المطلوب</label><input class="in" name="age" value="${esc(j?.age || '')}" placeholder="مثال: من 21 إلى 40 سنة"></div>
         </div>
-      </div>
-      <div class="err" data-err></div>
-      <div class="row" style="justify-content:flex-end"><button type="button" class="btn sec" data-close>إلغاء</button><button class="btn pri">${j && !isCopy ? 'حفظ' : 'نشر'}</button></div>
-    </form>`, 'wide');
-  const f = $('form', m.el);
+        <div class="grid3">
+          <div><label class="f">المحافظة</label><input class="in" name="gov" value="${esc(j?.gov || '')}" list="jf-govs" placeholder="مثال: القاهرة" required><datalist id="jf-govs">${GOVS.map((g) => `<option>${g}</option>`).join('')}</datalist></div>
+          <div><label class="f">المنطقة</label><input class="in" name="region" value="${esc(j?.region || '')}" list="jf-regs" placeholder="مثال: مدينة نصر" required><datalist id="jf-regs"></datalist></div>
+          <div><label class="f">نوع الشغل (الدوام)</label><select class="in" name="type">${['دوام كامل (Full-Time)', 'بارت تايم (Part-Time)', 'شفتات متغيرة (Shifts)', 'عمل حر (Freelance)'].map((t) => `<option ${j?.work_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        </div>
+        <div class="grid3">
+          <div><label class="f">المركبة المطلوبة</label><select class="in" name="vehicle">${VEHICLES.map((v) => `<option ${j?.vehicle === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+          <div><label class="f jf-green">🏷️ التسعيرة (Pricing)</label><input class="in" name="pricing" value="${esc(j?.pricing || '')}" placeholder="مثال: 45 ج للطلب أو 6000 ج ثابت" required></div>
+          <div><label class="f jf-orange">🎁 البونص (Bonus)</label><select class="in" name="bonus">${bonusOpts(j?.company_id, j?.bonus_text)}</select></div>
+        </div>
+        <div class="grid3">
+          <div><label class="f jf-blue">👥 العدد المطلوب</label>
+            <select class="in" name="hcsel"><option value="">مفتوح (بدون عدد محدد)</option>${HC_OPTS.map((n) => `<option value="${n}" ${hc === n ? 'selected' : ''}>${n}</option>`).join('')}<option value="other" ${hcOther ? 'selected' : ''}>عدد تاني...</option></select>
+            <input class="in" type="number" min="1" name="hc" value="${hcOther ? hc : ''}" placeholder="اكتب العدد" style="margin-top:6px" ${hcOther ? '' : 'hidden'}></div>
+          <div><label class="f jf-red">⏳ تاريخ انتهاء الوظيفة (اختياري)</label><input class="in" type="date" name="expiry" value="${j?.expiry || ''}" min="${today()}"></div>
+          <div ${editing ? '' : 'hidden'}><label class="f">الحالة</label><select class="in" name="status"><option value="Active" ${j?.status !== 'Inactive' ? 'selected' : ''}>نشطة</option><option value="Inactive" ${j?.status === 'Inactive' ? 'selected' : ''}>متوقفة</option></select></div>
+        </div>
+        <div><label class="f">الورق المطلوب (حدد ما يناسب)</label><div class="jf-docs">${DOCS.map((d) => `<label><input type="checkbox" name="doc" value="${d}" ${has(d) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+        <div><label class="f">تفاصيل إضافية</label><textarea class="in" name="details" rows="3" placeholder="أية شروط أو تفاصيل أو مميزات إضافية للوظيفة...">${esc(j?.details || '')}</textarea></div>
+        <div class="jloc">
+          <div class="jloc-h"><label class="f" style="margin:0">📍 مكان الوظيفة على الخريطة</label><span class="jloc-st" data-locst></span></div>
+          <div class="jloc-map" data-map><div class="jloc-ph">بنحمّل الخريطة...</div></div>
+          <div class="row jloc-act">
+            <button type="button" class="btn sec sm" data-geo>🔎 دوّر على المنطقة</button>
+            <button type="button" class="btn ghost sm" data-clearloc>شيل المكان</button>
+            <span class="small muted">دوس على الخريطة عشان تحط دبوس، وتقدر تسحبه.</span>
+          </div>
+        </div>
+        <div class="err" data-err></div>
+        <div class="row" style="justify-content:flex-start;gap:8px"><button class="btn pri jf-go">${editing ? '💾 حفظ التعديلات' : '✔ نشر الوظيفة في السيستم'}</button><button type="button" class="btn sec" data-cancel>إلغاء</button></div>
+      </form>
+    </div>`);
+  const f = $('form', $('#view'));
   const loc = { lat: j?.lat ?? null, lng: j?.lng ?? null, prec: j?.lat != null ? (j.geo_precision || 'pin') : null };
-  setupJobMap(m.el, f, loc);
-  f.company.onchange = () => { if (!f.bonus.value) { const c = S.companies.find((x) => x.id === f.company.value); if (c) f.bonus.value = `${c.full_amount} ج.م بعد ${c.target_days} يوم`; } };
+  setupJobMap($('#view'), f, loc);
+  $('[data-back]').onclick = $('[data-cancel]').onclick = () => go('jobs');
+  f.company.onchange = () => { f.bonus.innerHTML = bonusOpts(f.company.value); };
+  f.hcsel.onchange = () => { const o = f.hcsel.value === 'other'; f.hc.hidden = !o; if (o) f.hc.focus(); };
+  // Region suggestions come from regions already used in jobs for the chosen governorate.
+  const regs = async () => {
+    const { data } = await sb.from('jobs').select('region').eq('gov', f.gov.value.trim()).limit(500);
+    $('#jf-regs').innerHTML = [...new Set((data || []).map((x) => x.region).filter(Boolean))].map((r) => `<option>${esc(r)}</option>`).join('');
+  };
+  f.gov.onchange = regs; if (f.gov.value) regs();
   f.onsubmit = async (e) => {
     e.preventDefault();
     const c = S.companies.find((x) => x.id === f.company.value);
+    const hcv = f.hcsel.value === 'other' ? Number(f.hc.value) || null : f.hcsel.value ? Number(f.hcsel.value) : null;
+    if (f.hcsel.value === 'other' && !hcv) return ($('[data-err]', f).textContent = 'اكتب العدد المطلوب');
     const rec = {
-      company_id: f.company.value, company_name: c?.name ?? null, title: f.title.value.trim(), age: f.age.value.trim(), gov: f.gov.value, region: f.region.value.trim(),
-      work_type: f.type.value, vehicle: f.vehicle.value, pricing: f.pricing.value.trim(), bonus_text: f.bonus.value.trim() || (c ? `${c.full_amount} ج.م بعد ${c.target_days} يوم` : ''),
-      headcount: f.hc.value ? Number(f.hc.value) : null, expiry: f.expiry.value || null, status: f.status.value,
+      company_id: f.company.value, company_name: c?.name ?? null, title: f.title.value.trim(), age: f.age.value.trim(), gov: f.gov.value.trim(), region: f.region.value.trim(),
+      work_type: f.type.value, vehicle: f.vehicle.value, pricing: f.pricing.value.trim(), bonus_text: f.bonus.value || (c ? `${c.full_amount} ج.م (${c.target_days} يوم)` : ''),
+      headcount: hcv, expiry: f.expiry.value || null, status: editing ? f.status.value : 'Active',
       docs: $$('[name=doc]:checked', f).map((x) => x.value).join('، '), details: f.details.value.trim(),
       lat: loc.lat, lng: loc.lng, geo_precision: loc.lat == null ? null : loc.prec,
     };
     await busy($('button.pri', f), async () => {
-      const q = j && !isCopy ? sb.from('jobs').update(rec).eq('id', j.id) : sb.from('jobs').insert({ ...rec, created_by: (await sb.auth.getUser()).data.user.id });
+      const q = editing ? sb.from('jobs').update(rec).eq('id', j.id) : sb.from('jobs').insert({ ...rec, created_by: (await sb.auth.getUser()).data.user.id });
       const { error } = await q;
       if (error) return ($('[data-err]', f).textContent = errMsg(error));
-      m.close(); toast(j && !isCopy ? 'تم الحفظ ✅' : 'تم نشر الوظيفة 🚀', 'ok'); go('jobs');
+      toast(editing ? 'تم الحفظ ✅' : 'تم نشر الوظيفة 🚀', 'ok'); go('jobs');
     });
   };
 }
