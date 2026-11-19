@@ -1,6 +1,6 @@
 // Full Speed Network — Freelancer app
 import {
-  sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, toast, modal, errMsg, busy,
+  sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, logoSrc, toast, modal, errMsg, busy,
   GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip,
 } from './shared/common.js';
 
@@ -18,6 +18,14 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } },
 };
 const ukey = (k) => `fsf-${k}-${S.summary?.freelancer?.id || 'x'}`;
+
+function applyTheme(v) {
+  if (v === 'dark' || v === 'light') document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+  const dark = v === 'dark' || (!v && matchMedia('(prefers-color-scheme: dark)').matches);
+  $('meta[name=theme-color]').content = dark ? '#0e1411' : '#f6f7f3';
+}
+applyTheme(store.get('fsf-theme', ''));
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(store.get('fsf-theme', '')));
 
 // Hide the floating dock while the on-screen keyboard is up.
 const isTextField = (el) => el?.matches?.('input:not([type=radio]):not([type=checkbox]),select,textarea');
@@ -112,6 +120,20 @@ function earnedByCand() {
   const m = {};
   (S.ledger || []).filter((l) => !l.reversed_at && l.candidate_id).forEach((l) => { m[l.candidate_id] = (m[l.candidate_id] || 0) + Number(l.amount); });
   return m;
+}
+// Egyptian work week starts Saturday.
+function weekStats() {
+  if (!S.cands) return null;
+  const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 1) % 7));
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const s0 = iso(start), s1 = iso(new Date(start.getFullYear(), start.getMonth(), start.getDate() - 7));
+  const inW = (d, a, b) => d && String(d).slice(0, 10) >= a && (!b || String(d).slice(0, 10) < b);
+  const calc = (a, b) => ({
+    earned: (S.ledger || []).filter((l) => !l.reversed_at && inW(l.earned_on, a, b)).reduce((t, l) => t + Number(l.amount), 0),
+    sent: S.cands.filter((c) => inW(c.created_at, a, b)).length,
+    started: S.cands.filter((c) => inW(c.start_date, a, b)).length,
+  });
+  return { cur: calc(s0), prev: calc(s1, s0) };
 }
 function forecast() {
   if (!S.cands) return null;
@@ -343,7 +365,7 @@ const targetDays = (companyId) => {
 const findJob = (id) => S.jobs?.find((j) => String(j.id) === id);
 function bindJobActions(root) {
   $$('[data-apply]', root).forEach((b) => b.onclick = () => addCourier(findJob(b.dataset.apply)));
-  $$('[data-share]', root).forEach((b) => b.onclick = () => shareJob(findJob(b.dataset.share)));
+  $$('[data-share]', root).forEach((b) => b.onclick = () => shareSheet(findJob(b.dataset.share)));
   $$('.calc', root).forEach((c) => c.onclick = (e) => {
     const b = e.target.closest('[data-d]'); if (!b) return;
     const n = Math.min(20, Math.max(1, Number(c.dataset.n) + Number(b.dataset.d)));
@@ -369,6 +391,9 @@ async function home() {
   const fc = forecast();
   const stalled = (S.cands || []).map((c) => ({ c, why: stallOf(c) })).filter((x) => x.why);
   const fcBig = fc ? fc.active || fc.pending : 0;
+  const wk = weekStats();
+  const delta = (a, b, isMoney) => (a === b ? '<i class="wk-d eq">= زي اللي فات</i>'
+    : `<i class="wk-d ${a > b ? 'up' : 'down'}">${a > b ? '▲' : '▼'} ${isMoney ? money(Math.abs(a - b)) : Math.abs(a - b)}</i>`);
   const lv = level(n.hired || 0);
   const bonusTotal = (Number(b.paper_earned) || 0) + (Number(b.days_earned) || 0);
   const top = (S.jobs || []).slice(0, 6);
@@ -407,6 +432,16 @@ async function home() {
           : `لو الـ ${fc.np} ${fc.np === 1 ? 'مندوب' : 'مناديب'} اللي تحت المراجعة اتعيّنوا وكمّلوا`}</span>
       </span>
     </button>` : ''}
+
+    ${wk ? `<section class="week rise" style="--i:3">
+      <div class="wk-h"><b>📊 أسبوعك</b><span>من السبت لحد النهارده</span></div>
+      <div class="wk-g">
+        <div><span>كسبت</span><b>${money(wk.cur.earned)}</b>${delta(wk.cur.earned, wk.prev.earned, true)}</div>
+        <div><span>رشّحت</span><b>${wk.cur.sent}</b>${delta(wk.cur.sent, wk.prev.sent)}</div>
+        <div><span>بدأوا شغل</span><b>${wk.cur.started}</b>${delta(wk.cur.started, wk.prev.started)}</div>
+      </div>
+      ${!wk.cur.sent && !wk.cur.earned ? '<p class="wk-tip">الأسبوع لسه في أوله 💪 رشّح مندوب النهارده وابدأ بقوة.</p>' : ''}
+    </section>` : ''}
 
     ${stalled.length ? `<section class="follow rise" style="--i:3">
       <div class="fl-h"><b>⚠️ محتاجين متابعة منك</b><button class="link" data-nav="couriers:">الكل ${IC.chev}</button></div>
@@ -550,6 +585,85 @@ function jobCard(j, i) {
     ${(j.docs || j.details) ? `<details class="more"><summary>التفاصيل والورق المطلوب</summary>${j.docs ? `<p><b>الورق:</b> ${esc(j.docs)}</p>` : ''}${j.details ? `<p>${esc(j.details)}</p>` : ''}</details>` : ''}
     <button class="btn pri block" data-apply="${esc(j.id)}">${IC.plus} رشّح مندوب على الوظيفة دي</button>
   </article>`;
+}
+function shareSheet(j) {
+  if (!j) return;
+  const m = modal(`
+    <div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">${IC.share}</div><div><h2>شارك الوظيفة</h2><p>${esc(j.title)} · ${esc(j.company)}</p></div></div>
+    <div class="share-opts">
+      <button class="share-opt" data-s="img"><span>🖼️</span><b>صورة للستوري</b><em>صورة جاهزة بتصميم Full Speed لستوري واتساب وفيسبوك</em></button>
+      <button class="share-opt" data-s="txt"><span>💬</span><b>رسالة نصية</b><em>تفاصيل الوظيفة كرسالة على واتساب</em></button>
+    </div>`);
+  $('[data-s=txt]', m.el).onclick = () => { m.close(); shareJob(j); };
+  $('[data-s=img]', m.el).onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true; $('b', b).textContent = 'بنجهّز الصورة...';
+    try { const blob = await storyImage(j); m.close(); previewStory(blob, j); } catch { toast('مقدرناش نعمل الصورة، جرّب تاني', 'bad'); b.disabled = false; }
+  };
+}
+const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+function wrapLines(x, text, maxW, maxLines) {
+  const words = String(text || '').split(/\s+/).filter(Boolean), lines = [];
+  let cur = '';
+  for (const w of words) {
+    const t = cur ? cur + ' ' + w : w;
+    if (x.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] += '…'; }
+  return lines;
+}
+async function storyImage(j) {
+  const W = 1080, H = 1920, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  await Promise.all(['700', '500'].map((w) => document.fonts.load(`${w} 60px "Readex Pro"`).catch(() => {})));
+  const F = (w, s) => `${w} ${s}px "Readex Pro", Cairo, sans-serif`;
+  const circle = (cx, cy, r) => { x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill(); };
+  const rr = (rx, ry, w, h, r) => { x.beginPath(); x.roundRect(rx, ry, w, h, r); x.fill(); };
+  const g = x.createLinearGradient(0, 0, W * 0.6, H); g.addColorStop(0, '#0a8a4e'); g.addColorStop(0.55, '#10a861'); g.addColorStop(1, '#f37021');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.fillStyle = 'rgba(255,255,255,.08)'; circle(140, 220, 300); circle(W - 60, H - 300, 420); circle(W - 120, 520, 120);
+  x.direction = 'rtl'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  const mark = await loadImg('brand/fs-mark.png');
+  x.fillStyle = '#fff'; circle(W / 2, 200, 118); x.drawImage(mark, W / 2 - 98, 102, 196, 196);
+  x.fillStyle = '#fff'; x.font = F(700, 46); x.fillText('Full Speed', W / 2, 372);
+  x.shadowColor = 'rgba(0,0,0,.18)'; x.shadowBlur = 50; x.shadowOffsetY = 20;
+  x.fillStyle = '#fff'; rr(70, 450, W - 140, 1180, 60);
+  x.shadowColor = 'transparent';
+  x.fillStyle = '#f37021'; rr(W / 2 - 150, 410, 300, 84, 42);
+  x.fillStyle = '#fff'; x.font = F(700, 44); x.fillText('🚀 مطلوب', W / 2, 454);
+  x.fillStyle = '#17231d'; x.font = F(700, 82);
+  const tl = wrapLines(x, j.title, W - 260, 2);
+  tl.forEach((l, k) => x.fillText(l, W / 2, 600 + k * 100));
+  let y = 600 + tl.length * 100 + 40;
+  const lsrc = j.logo_url ? logoSrc(j.logo_url) : '';
+  let logo = null; if (lsrc.startsWith('/logos/')) logo = await loadImg(lsrc).catch(() => null);
+  x.fillStyle = '#f1f4ef'; circle(W / 2, y + 70, 78);
+  if (logo) { x.save(); x.beginPath(); x.arc(W / 2, y + 70, 72, 0, Math.PI * 2); x.clip(); x.drawImage(logo, W / 2 - 72, y - 2, 144, 144); x.restore(); }
+  else { x.fillStyle = '#0b8a4e'; x.font = F(700, 52); x.fillText((j.company || '?').slice(0, 2), W / 2, y + 72); }
+  x.fillStyle = '#46524b'; x.font = F(500, 46); x.fillText(j.company || '', W / 2, y + 200);
+  y += 290;
+  const facts = [[`📍 ${[j.gov, j.region].filter(Boolean).join(' — ')}`, '#fff0e6', '#b4450f'], j.vehicle ? [`${VEH_EMOJI[j.vehicle] || '🛵'} ${j.vehicle}${j.work_type ? ' · ' + j.work_type : ''}`, '#e2f5ff', '#0a5b85'] : null].filter(Boolean);
+  facts.forEach(([t, bg, fg]) => {
+    x.font = F(500, 42); const w = Math.min(W - 220, x.measureText(t).width + 80);
+    x.fillStyle = bg; rr(W / 2 - w / 2, y - 42, w, 84, 42); x.fillStyle = fg; x.fillText(t, W / 2, y); y += 110;
+  });
+  if (j.pricing) {
+    y += 10; x.fillStyle = '#e3f6ec'; rr(150, y - 20, W - 300, 220, 40);
+    x.fillStyle = '#0b8a4e'; x.font = F(500, 38); x.fillText('💰 التسعيرة', W / 2, y + 30);
+    x.font = F(700, 56); const pl = wrapLines(x, j.pricing, W - 380, 2); pl.forEach((l, k) => x.fillText(l, W / 2, y + 100 + k * 64));
+  }
+  x.fillStyle = '#17231d'; x.font = F(500, 40); x.fillText('للتقديم كلّمني على واتساب 👇', W / 2, 1735);
+  x.fillStyle = '#fff'; rr(220, 1775, W - 440, 100, 50);
+  x.fillStyle = '#0b8a4e'; x.font = F(700, 54); x.direction = 'ltr'; x.fillText('0' + S.summary.freelancer.mobile, W / 2, 1827);
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('blob'))), 'image/png'));
+}
+function previewStory(blob, j) {
+  const url = URL.createObjectURL(blob), file = new File([blob], `fullspeed-job-${j.code || j.id}.png`, { type: 'image/png' });
+  const canShare = !!navigator.canShare?.({ files: [file] });
+  const m = modal(`<div class="story-prev"><img src="${url}" alt="صورة الوظيفة"></div>
+    <div class="sheet-actions">${canShare ? '<button class="btn pri grow" data-sh>📤 شارك الصورة</button>' : ''}<a class="btn ${canShare ? 'sec' : 'pri grow'}" href="${url}" download="${esc(file.name)}">⬇️ حفظ</a></div>`);
+  const sh = $('[data-sh]', m.el);
+  if (sh) sh.onclick = () => navigator.share({ files: [file], text: `مطلوب ${j.title} — ${j.company}` }).catch(() => {});
 }
 function shareJob(j) {
   if (!j) return;
@@ -713,7 +827,12 @@ async function wallet() {
   };
   const wdRow = (x, i) => `<div class="tx rise" style="--i:${Math.min(i, 10)};--c:var(--orange)">
       <div class="tx-ic">${IC.cash}</div>
-      <div class="grow"><b>${esc(x.method)}</b><span class="mono" style="text-align:right">${esc(x.details)}</span><span>${fmtDate(x.created_at)}</span>
+      <div class="grow"><b>${esc(x.method)}</b><span class="mono" style="text-align:right">${esc(x.details)}</span>
+        <ol class="wd-steps ${esc(x.status)}">
+          <li class="ok"><i></i><span>اتبعت<br>${fmtDate(x.created_at)}</span></li>
+          <li class="${x.status === 'pending' ? 'now' : 'ok'}"><i></i><span>مراجعة<br>الإدارة</span></li>
+          <li class="${x.status === 'paid' ? 'ok' : x.status === 'rejected' ? 'bad' : ''}"><i></i><span>${x.status === 'rejected' ? 'اترفض' : 'اتحوّل'}<br>${x.decided_at ? fmtDate(x.decided_at) : '—'}</span></li>
+        </ol>
         ${x.admin_note ? `<span class="tx-note">${esc(x.admin_note)}</span>` : ''}</div>
       <div class="tx-end"><div class="tx-amt" style="color:var(--ink)">${money(x.amount)}</div>${chip(WD_STATUS, x.status)}</div>
     </div>`;
@@ -856,10 +975,19 @@ async function me() {
         <button class="btn sec">تغيير كلمة المرور</button>
       </form>
     </section>
+    <section class="card rise" style="--i:3;margin-top:14px">
+      <h3>🌓 المظهر</h3>
+      <div class="theme-seg">${[['', '📱 تلقائي'], ['light', '☀️ فاتح'], ['dark', '🌙 غامق']].map(([v, t]) => `<button class="pill ${(store.get('fsf-theme', '') || '') === v ? 'on' : ''}" data-theme-set="${v}">${t}</button>`).join('')}</div>
+    </section>
     <button class="btn sec block rise" style="--i:3;margin-top:14px" data-tour>🧭 شوف الجولة التعريفية تاني</button>
     <button class="btn out block rise" style="--i:4;margin-top:10px" data-logout>${IC.logout} تسجيل الخروج</button>`);
   $('#view [data-logout]').onclick = logout;
   $('#view [data-tour]').onclick = () => maybeTour(true);
+  $$('[data-theme-set]').forEach((b) => b.onclick = () => {
+    const v = b.dataset.themeSet;
+    store.set('fsf-theme', v); applyTheme(v); buzz(5);
+    $$('[data-theme-set]').forEach((x) => x.classList.toggle('on', x === b));
+  });
   $('#pf').onsubmit = async (e) => {
     e.preventDefault(); const t = e.target;
     await busy($('button', t), async () => {

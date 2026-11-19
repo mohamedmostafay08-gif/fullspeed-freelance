@@ -26,9 +26,10 @@ export const waLink = (m) => `https://wa.me/20${normMobile(m)}`;
 
 // Company logos are stored as Google Drive share links; serve the bundled copy, then Drive's image CDN, then initials.
 const driveId = (url) => String(url || '').match(/(?:\/d\/|[?&]id=)([\w-]{20,})/)?.[1];
+export const logoSrc = (url) => { const id = driveId(url); return id ? `/logos/${id}.webp` : String(url || ''); };
 export function logoImg(url, text = '') {
   const id = driveId(url);
-  const src = id ? `/logos/${id}.webp` : String(url || '');
+  const src = logoSrc(url);
   if (!src) return esc(text);
   const alt = id ? `https://lh3.googleusercontent.com/d/${id}=w160` : '';
   return `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-alt="${esc(alt)}" data-txt="${esc(text)}"
