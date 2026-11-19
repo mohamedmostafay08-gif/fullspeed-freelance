@@ -7,6 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../shared/config.js';
 import { initI18n, isEn } from './i18n.js';
 import { mountTopbar, mountAuthTools, applyTheme } from './topbar.js';
 import * as AX from './analytics.js';
+import { initPalette, searchBtn, widthBtn } from './palette.js';
 
 applyTheme();
 initI18n();
@@ -107,6 +108,8 @@ async function boot() {
   $$('#nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
   show('app');
   mountTopbar($('#topbar'), { me: st, getView: () => S.view });
+  { const acts = $('#topbar .tb-acts'); if (acts) { acts.prepend(searchBtn()); acts.append(widthBtn()); } }
+  initPalette({ S, go, can, openProfile, openCourier, jobEdit, nav: () => NAV.filter((n) => n[2] === 'owneronly' ? S.me?.role === 'owner' : can(n[2])).map((n) => [n[0], n[1]]) });
   renderPushCtl();
   await loadBase();
   go(S.view);

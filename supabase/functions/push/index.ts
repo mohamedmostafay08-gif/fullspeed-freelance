@@ -1,6 +1,7 @@
 // Web push sender.
 // GET  -> { publicKey } (VAPID keys are generated once and kept in app_secrets, never leave the server)
-// POST -> { id } from the notifications_push DB trigger, authenticated with x-push-key.
+// POST -> { id } from the notifications_push DB trigger, or { action: 'daily_report' | 'weekly_report' } from pg_cron,
+//         or { action: 'staff_alert', roles, title, body, url } from other edge functions. All use x-push-key.
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -67,6 +68,34 @@ async function dailyReport() {
   return { sent: await sendTo('staff_push_subscriptions', subs, payload) };
 }
 
+async function staffSubs(roles?: string[]) {
+  const { data: subs } = await sb.from('staff_push_subscriptions').select('id,user_id,endpoint,p256dh,auth');
+  if (!subs?.length || !roles?.length) return subs ?? [];
+  const { data: st } = await sb.from('staff').select('user_id').in('role', roles).eq('active', true);
+  const ok = new Set((st ?? []).map((x) => x.user_id));
+  return subs.filter((s) => ok.has(s.user_id));
+}
+async function sendStaff(subs: { id: number; endpoint: string; p256dh: string; auth: string }[], msg: Record<string, string>) {
+  if (!subs.length) return { sent: 0 };
+  const { pub, priv } = await vapid();
+  webpush.setVapidDetails('mailto:no-reply@fullspeedlogistics.com', pub, priv);
+  return { sent: await sendTo('staff_push_subscriptions', subs, JSON.stringify(msg)) };
+}
+const delta = (a: number, b: number) => (b ? ` (${a >= b ? '+' : ''}${Math.round(((a - b) / b) * 100)}%)` : '');
+async function weeklyReport() {
+  const subs = await staffSubs();
+  if (!subs.length) return { sent: 0 };
+  const { data: r, error } = await sb.rpc('weekly_report_data');
+  if (error || !r) { console.error('weekly report failed', error?.message); return { error: 'report' }; }
+  const body = [
+    `${fmt(r.nominations)} ترشيح${delta(r.nominations, r.nominations_prev)}`,
+    `${fmt(r.hires)} بدأوا شغل`,
+    `${fmt(r.new_partners)} شريك جديد`,
+    `بونص ${fmt(r.bonus)} ج`,
+  ].join(' · ');
+  return sendStaff(subs, { title: '📄 التقرير الأسبوعي جاهز', body, url: '/admin/?go=report', tag: 'weekly-report' });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method === 'GET') return reply({ publicKey: (await vapid()).pub });
@@ -77,6 +106,14 @@ Deno.serve(async (req) => {
 
   const body = await req.json().catch(() => ({}));
   if (body.action === 'daily_report') return reply(await dailyReport());
+  if (body.action === 'weekly_report') return reply(await weeklyReport());
+  if (body.action === 'staff_alert') {
+    const roles = Array.isArray(body.roles) ? body.roles.map(String) : ['owner'];
+    return reply(await sendStaff(await staffSubs(roles), {
+      title: String(body.title ?? '').slice(0, 120), body: String(body.body ?? '').slice(0, 300),
+      url: String(body.url ?? '/admin/').startsWith('/admin') ? String(body.url ?? '/admin/') : '/admin/', tag: String(body.tag ?? 'staff-alert').slice(0, 60),
+    }));
+  }
   const { id } = body;
   const { data: n } = await sb.from('notifications').select('id,freelancer_id,kind,title,body,link').eq('id', id).maybeSingle();
   if (!n) return reply({ error: 'not_found' }, 404);

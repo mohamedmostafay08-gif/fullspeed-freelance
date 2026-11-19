@@ -1,5 +1,6 @@
-// Passkey (fingerprint / face) registration and login for partners.
+// Passkey (fingerprint / face) registration and login for partners and admin staff (same passkeys table).
 // Login success returns a one-time magic-link token_hash; the browser exchanges it with supabase.auth.verifyOtp.
+// 'log-login' records an admin sign-in (staff_logins) and alerts owners by push when it comes from a new device.
 import {
   generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse,
 } from 'npm:@simplewebauthn/server@13.1.1';
@@ -61,7 +62,7 @@ Deno.serve(async (req) => {
         if (!user) return reply({ error: 'unauthorized' }, 401);
         const { data: existing } = await sb.from('passkeys').select('id,transports').eq('user_id', user.id);
         const options = await generateRegistrationOptions({
-          rpName: 'Full Speed Partners', rpID: RP_ID,
+          rpName: body.app === 'admin' ? 'Full Speed Admin' : 'Full Speed Partners', rpID: RP_ID,
           userName: String(body.label || user.email || 'partner').slice(0, 64),
           userID: new TextEncoder().encode(user.id),
           attestationType: 'none',
@@ -107,6 +108,34 @@ Deno.serve(async (req) => {
         const { data: link, error } = await sb.auth.admin.generateLink({ type: 'magiclink', email: u.user.email });
         if (error || !link?.properties?.hashed_token) return reply({ error: 'session_failed' }, 500);
         return reply({ token_hash: link.properties.hashed_token });
+      }
+      case 'log-login': {
+        const user = await userFrom(req);
+        if (!user) return reply({ error: 'unauthorized' }, 401);
+        const { data: st } = await sb.from('staff').select('email,role,active').eq('user_id', user.id).maybeSingle();
+        if (!st?.active) return reply({ error: 'not_staff' }, 403);
+        const deviceHash = String(body.device_hash ?? '').replace(/[^\w-]/g, '').slice(0, 64);
+        if (deviceHash.length < 8) return reply({ error: 'bad_device' }, 400);
+        const method = ['password', 'passkey', 'session'].includes(body.method) ? body.method : 'session';
+        const device = String(body.device ?? '').slice(0, 80) || null;
+        const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim().slice(0, 64) || null;
+        const { count } = await sb.from('staff_logins').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('device_hash', deviceHash);
+        const isNew = !count;
+        const { error } = await sb.from('staff_logins').insert({
+          user_id: user.id, email: st.email, method, device_hash: deviceHash, device, ua: String(req.headers.get('user-agent') ?? '').slice(0, 300), ip, new_device: isNew,
+        });
+        if (error) return reply({ error: 'save_failed' }, 500);
+        if (isNew) {
+          // Best effort: a failed push must not block the sign-in.
+          const { data: k } = await sb.from('app_secrets').select('value').eq('key', 'push_key').maybeSingle();
+          if (k?.value) {
+            await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/push`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-push-key': k.value },
+              body: JSON.stringify({ action: 'staff_alert', roles: ['owner'], title: '🛡️ دخول من جهاز جديد', body: `${st.email} — ${device || 'جهاز'}${ip ? ` • ${ip}` : ''}`, url: '/admin/?go=staff', tag: `login-${deviceHash}` }),
+            }).catch((e) => console.error('alert push failed', (e as Error).message));
+          }
+        }
+        return reply({ ok: true, new_device: isNew });
       }
       default:
         return reply({ error: 'bad_action' }, 400);
