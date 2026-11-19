@@ -29,6 +29,7 @@ const L = {
       job_closed: 'الوظيفة دي اتقفلت، اختار وظيفة تانية.',
       job_full: 'الوظيفة دي اكتمل عددها، اختار وظيفة تانية.',
       captcha: 'لازم تأكد إنك مش روبوت الأول.',
+      account_frozen: 'اللينك ده موقوف مؤقتاً. كلّم الشخص اللي بعتهولك.',
     },
   },
   en: {
@@ -52,6 +53,7 @@ const L = {
       job_closed: 'This job just closed, please choose another.',
       job_full: 'This job is full, please choose another.',
       captcha: 'Please confirm you are not a robot first.',
+      account_frozen: 'This link is paused for now. Contact the person who sent it.',
     },
   },
 };

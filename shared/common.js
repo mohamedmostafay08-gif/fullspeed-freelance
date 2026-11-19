@@ -3,7 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, storageKey: /\/admin(\/|$)/.test(location.pathname) ? 'fsf-admin' : 'fsf-app' },
+  auth: { persistSession: true, autoRefreshToken: true, storageKey: /\/admin(\/|$)/.test(location.pathname) || /[?&]as=/.test(location.search) ? 'fsf-admin' : 'fsf-app' },
 });
 
 export const $ = (s, el = document) => el.querySelector(s);
@@ -112,6 +112,12 @@ const ERR = {
   'Password should be at least': 'كلمة المرور لازم 6 حروف/أرقام على الأقل.',
   'Failed to fetch': 'مفيش اتصال بالإنترنت. حاول تاني.',
   'row-level security': 'صلاحيتك لا تسمح بالإجراء ده.',
+  account_frozen: 'الحساب ده متجمّد مؤقتاً — السحب والترشيح موقوفين. كلّم الإدارة.',
+  feature_off: 'الميزة دي مقفولة دلوقتي من الإدارة.',
+  changed_since: 'السجل ده اتعدّل تاني بعد التعديل ده — مينفعش ترجّعه أوتوماتيك.',
+  only_updates: 'الرجوع متاح للتعديلات بس (مش الإضافة أو المسح).',
+  table_not_allowed: 'الرجوع مش متاح للنوع ده من البيانات (فلوس أو صلاحيات).',
+  owner_has_all: 'المالك ليه كل الصلاحيات دايماً.',
 };
 export function errMsg(e) {
   const m = String(e?.message ?? e?.error ?? e ?? '');

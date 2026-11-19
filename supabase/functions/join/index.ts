@@ -3,7 +3,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)?fullspeed-freelance\.pages\.dev$/, /^https:\/\/freelance\.fullspeedlogistics\.com$/];
-const KNOWN = ['invalid_ref', 'invalid_input', 'rate_limited', 'courier_exists', 'job_closed', 'job_full'];
+const KNOWN = ['invalid_ref', 'invalid_input', 'rate_limited', 'courier_exists', 'job_closed', 'job_full', 'account_frozen'];
 
 function headers(origin: string) {
   const ok = ALLOWED.some((re) => re.test(origin));

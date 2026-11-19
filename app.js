@@ -29,7 +29,7 @@ applyTheme(store.get('fsf-theme', ''));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(store.get('fsf-theme', '')));
 
 // Privacy-friendly usage counters (aggregated per day, no user ids) and client error reports.
-const track = (ev) => { sb.rpc('track_event', { p_event: ev }).then(() => {}, () => {}); };
+const track = (ev) => { if (!RO) sb.rpc('track_event', { p_event: ev }).then(() => {}, () => {}); };
 let errCount = 0;
 function reportError(message, stack) {
   if (errCount++ >= 5 || !message || /ResizeObserver|Script error/i.test(message)) return;
@@ -94,7 +94,7 @@ const IC = {
 };
 const VEH_EMOJI = { 'موتوسيكل': '🏍️', 'سيارة': '🚗', 'دراجة / اسكوتر': '🛴', 'تروسيكل': '🛺', 'مترجل (بدون مركبة)': '🚶' };
 const METHODS = [['فودافون كاش', '#e60000'], ['اتصالات كاش', '#6fae1c'], ['أورنج كاش', '#ff7900'], ['وي باي', '#6b2fa0'], ['إنستاباي InstaPay', '#3b2a8c'], ['تحويل بنكي', '#1f6feb']];
-const LEVELS = [
+const DEFAULT_LEVELS = [
   { n: 'مبتدئ', min: 0, c: '#8a86a8', i: '🌱' }, { n: 'برونزي', min: 1, c: '#c8661b', i: '🥉' },
   { n: 'فضي', min: 5, c: '#64748b', i: '🥈' }, { n: 'ذهبي', min: 15, c: '#c99400', i: '🥇' }, { n: 'ماسي', min: 30, c: '#7b5cff', i: '💎' },
 ];
@@ -102,7 +102,16 @@ const LEVELS = [
 const hue = (s) => { let h = 7; for (const ch of String(s || '')) h = (h * 31 + ch.codePointAt(0)) % 360; return h; };
 const initials = (name) => String(name || '').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('') || '؟';
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'صباح الخير ☀️' : h < 18 ? 'يومك سعيد 🌤️' : 'مساء الخير 🌙'; };
+const LEVELS_OF = () => {
+  const l = S.settings?.levels;
+  return Array.isArray(l) && l.length && l[0].min === 0 ? [...l].sort((a, b) => a.min - b.min) : DEFAULT_LEVELS;
+};
+const feat = (k) => S.settings?.features?.[k] !== false;
+// Staff opening /?as=<partner id> from the admin panel get a read-only copy of that partner's app.
+const VIEW_AS = new URLSearchParams(location.search).get('as');
+const RO = !!VIEW_AS;
 function level(hired) {
+  const LEVELS = LEVELS_OF();
   let i = 0; LEVELS.forEach((l, k) => { if (hired >= l.min) i = k; });
   const cur = LEVELS[i], next = LEVELS[i + 1];
   return { ...cur, next, left: next ? next.min - hired : 0, pct: next ? Math.round(((hired - cur.min) / (next.min - cur.min)) * 100) : 100 };
@@ -387,19 +396,49 @@ $$('[data-logout]').forEach((b) => b.onclick = logout);
 $('#waitRefresh').onclick = () => boot();
 
 // ------------------------------------------------------------------ boot
+async function loadSettings() {
+  const { data } = await sb.from('app_settings').select('key,value');
+  S.settings = Object.fromEntries((data || []).map((r) => [r.key, r.value]));
+  applyFeatures(); renderBanners();
+}
+function applyFeatures() {
+  $('#chatBtn').hidden = !feat('chat');
+  if (!feat('passkey')) $('#pkLogin').hidden = true;
+}
+function renderBanners() {
+  const host = $('#banners'); if (!host) return;
+  const out = [];
+  if (RO) out.push(`<div class="banner ro-b">👀 بتشوف التطبيق بعين <b>${esc(S.summary?.freelancer?.name || '')}</b> — عرض بس، مفيش أي حاجة بتتغيّر <button class="x" data-ro-x aria-label="قفل">×</button></div>`);
+  if (S.summary?.freelancer?.frozen) out.push(`<div class="banner warn">🔒 حسابك متجمّد مؤقتاً — السحب والترشيح موقوفين لحد ما الإدارة تراجع.${S.summary.freelancer.frozen_reason ? ` <small>(${esc(S.summary.freelancer.frozen_reason)})</small>` : ''}${feat('chat') && !RO ? ' <button class="link" data-banner-go="chat">كلّم الإدارة</button>' : ''}</div>`);
+  const a = S.settings?.announcement;
+  if (a?.on && a.text && store.get('fsf-annc-x', '') !== a.text) {
+    out.push(`<div class="banner ${esc(a.tone || 'info')}">📣 ${esc(a.text)}${a.link ? ` <button class="link" data-banner-go="${esc(a.link)}">شوف</button>` : ''} <button class="x" data-annc-x aria-label="إخفاء">×</button></div>`);
+  }
+  host.innerHTML = out.join('');
+  $$('[data-banner-go]', host).forEach((b) => b.onclick = () => go(b.dataset.bannerGo));
+  const ax = $('[data-annc-x]', host); if (ax) ax.onclick = () => { store.set('fsf-annc-x', a.text); renderBanners(); };
+  const rx = $('[data-ro-x]', host); if (rx) rx.onclick = () => window.close();
+}
+
 async function boot() {
   const { data } = await sb.auth.getSession();
-  if (!data.session) return show('auth');
-  const { data: sum, error } = await sb.rpc('my_summary');
-  if (error) { toast(errMsg(error), 'bad'); return show('auth'); }
+  if (!data.session) {
+    if (RO) { document.body.innerHTML = '<p style="padding:40px;text-align:center;font-family:sans-serif">افتح لوحة الإدارة وسجّل دخول الأول، وبعدين افتح "شوف التطبيق بعينه" تاني.</p>'; return; }
+    return show('auth');
+  }
+  const { data: sum, error } = RO ? await sb.rpc('admin_freelancer_summary', { p_freelancer: VIEW_AS }) : await sb.rpc('my_summary');
+  if (error) { toast(errMsg(error), 'bad'); return RO ? null : show('auth'); }
   if (!sum?.freelancer) {
+    if (RO) return toast('الشريك ده مش موجود', 'bad');
     await sb.auth.signOut();
     toast('الحساب ده مش حساب شريك.', 'bad');
     return show('auth');
   }
   S.summary = sum;
+  if (RO) document.body.classList.add('ro');
+  await loadSettings();
   const st = sum.freelancer.status;
-  if (st !== 'Active') {
+  if (st !== 'Active' && !RO) {
     $('#waitTitle').textContent = st === 'Pending' ? 'حسابك قيد المراجعة' : st === 'Hold' ? 'حسابك معلّق مؤقتاً' : 'حسابك موقوف';
     $('#waitText').textContent = st === 'Pending' ? 'الإدارة هتراجع بياناتك وتفعّل حسابك قريب.' : 'لو محتاج تفاصيل كلم الإدارة.';
     return show('waiting');
@@ -416,12 +455,13 @@ async function boot() {
   S.companies = c.data ?? []; S.rules = r.data ?? [];
   S.jobs = S.cands = S.ledger = null;
   if (store.get('fsf-open-day', '') !== today()) { store.set('fsf-open-day', today()); track('app:open'); }
-  setTimeout(flushQueue, 1500);
+  if (!RO) setTimeout(flushQueue, 1500);
   const want = new URLSearchParams(location.search).get('go');
   if (['home', 'jobs', 'couriers', 'wallet', 'me', 'chat'].includes(want)) { S.view = want; history.replaceState(null, '', location.pathname); }
   go(S.view);
+  if (RO) return;
   maybeTour();
-  setTimeout(maybeOfferPasskey, 2500);
+  if (feat('passkey')) setTimeout(maybeOfferPasskey, 2500);
 }
 function updateLevelChip() {
   const lv = level(S.summary?.counts?.hired || 0);
@@ -450,14 +490,14 @@ function go(v) {
 }
 
 // ------------------------------------------------------------------ notifications
-const NOTIF_IC = { hired: '🎉', rejected: '❌', accepted: '✅', paper: '📄', bonus: '💰', paid: '💸', wd_rejected: '⚠️', message: '💬', self_join: '🙌' };
+const NOTIF_IC = { new_job: '🚀', broadcast: '📣', frozen: '🔒', unfrozen: '✅', hired: '🎉', rejected: '❌', accepted: '✅', paper: '📄', bonus: '💰', paid: '💸', wd_rejected: '⚠️', message: '💬', self_join: '🙌' };
 const ago = (d) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(d)) / 60000));
   return m < 1 ? 'دلوقتي' : m < 60 ? `من ${m} دقيقة` : m < 1440 ? `من ${Math.round(m / 60)} ساعة` : m < 2880 ? 'امبارح' : fmtDate(d);
 };
 async function notificationsSheet() {
   const m = modal(`<div class="sheet-h"><div class="sheet-ic" style="--c:var(--orange)">🔔</div><div><h2>الإشعارات</h2><p>آخر اللي حصل في حسابك</p></div></div><div class="nlist"><div class="spin"></div></div>`);
-  const { data, error } = await sb.from('notifications').select('id,kind,title,body,link,created_at,read_at').order('created_at', { ascending: false }).limit(60);
+  const { data, error } = await sb.from('notifications').select('id,kind,title,body,link,created_at,read_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }).limit(60);
   const box = $('.nlist', m.el);
   if (error) { box.innerHTML = empty('⚠️', 'مقدرناش نحمّل الإشعارات', errMsg(error)); return; }
   box.innerHTML = data.length ? data.map((n) => `<button class="nitem ${n.read_at ? '' : 'unread'}" data-link="${esc(n.link || '')}">
@@ -465,7 +505,7 @@ async function notificationsSheet() {
       <span class="grow"><b>${esc(n.title)}</b>${n.body ? `<span>${esc(n.body)}</span>` : ''}<em>${ago(n.created_at)}</em></span></button>`).join('')
     : empty('🔕', 'مفيش إشعارات لسه', 'أول ما مندوب يتعيّن أو بونص ينزل هتلاقيه هنا.');
   $$('[data-link]', box).forEach((b) => b.onclick = () => { const l = b.dataset.link; m.close(); if (l) go(l); });
-  if (data.some((n) => !n.read_at)) { await sb.rpc('mark_notifications_read'); if (S.summary.unread) S.summary.unread.notifications = 0; updateLevelChip(); }
+  if (!RO && data.some((n) => !n.read_at)) { await sb.rpc('mark_notifications_read'); if (S.summary.unread) S.summary.unread.notifications = 0; updateLevelChip(); }
 }
 
 // ------------------------------------------------------------------ chat with admin
@@ -478,7 +518,7 @@ async function chat() {
   let lastId = 0;
   const bubble = (x) => `<div class="bub ${x.from_staff ? 'them' : 'me'}"><p>${esc(x.body)}</p><em>${ago(x.created_at)}${!x.from_staff && x.read_at ? ' · ✓✓' : ''}</em></div>`;
   const load = async () => {
-    const { data, error } = await sb.from('messages').select('id,from_staff,body,created_at,read_at').order('created_at').limit(300);
+    const { data, error } = await sb.from('messages').select('id,from_staff,body,created_at,read_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at').limit(300);
     if (S.view !== 'chat') return;
     if (error) { box.innerHTML = empty('⚠️', 'مقدرناش نحمّل المحادثة', errMsg(error)); return; }
     const newest = data.length ? data[data.length - 1].id : 0;
@@ -486,7 +526,7 @@ async function chat() {
     lastId = newest; box.dataset.ok = '1';
     box.innerHTML = data.length ? data.map(bubble).join('') : '<div class="chat-empty">👋 أهلاً بيك! اكتب سؤالك وفريق Full Speed هيرد عليك هنا.</div>';
     box.scrollTop = box.scrollHeight; window.scrollTo(0, document.body.scrollHeight);
-    if (data.some((x) => x.from_staff && !x.read_at)) { await sb.rpc('mark_messages_read'); if (S.summary.unread) S.summary.unread.messages = 0; updateLevelChip(); }
+    if (!RO && data.some((x) => x.from_staff && !x.read_at)) { await sb.rpc('mark_messages_read'); if (S.summary.unread) S.summary.unread.messages = 0; updateLevelChip(); }
   };
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; };
   f.onsubmit = async (e) => {
@@ -616,8 +656,8 @@ const view = (html) => {
 const loading = () => { $('#view').innerHTML = '<div class="sk-wrap"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>'; };
 
 async function refreshSummary() {
-  const { data } = await sb.rpc('my_summary');
-  if (data?.freelancer) { S.summary = data; updateLevelChip(); }
+  const { data } = RO ? await sb.rpc('admin_freelancer_summary', { p_freelancer: VIEW_AS }) : await sb.rpc('my_summary');
+  if (data?.freelancer) { S.summary = data; updateLevelChip(); renderBanners(); }
 }
 async function loadJobs() {
   if (S.jobs) return null;
@@ -629,8 +669,8 @@ async function loadJobs() {
 async function loadCands(force) {
   if (S.cands && !force) return;
   const [a, b] = await Promise.all([
-    sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at,source').order('created_at', { ascending: false }),
-    sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,note').order('created_at', { ascending: false }),
+    sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at,source').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
+    sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,note').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
   ]);
   if (a.error) throw a.error;
   S.cands = a.data; S.ledger = b.data ?? [];
@@ -703,8 +743,8 @@ async function home() {
       </span>
     </button>
     ${installCard()}
-    ${pushCard()}
-    ${S.summary.freelancer.ref_code ? `<button class="refcard rise" style="--i:2" data-ref>
+    ${feat('push_prompt') && !RO ? pushCard() : ''}
+    ${S.summary.freelancer.ref_code && feat('join') ? `<button class="refcard rise" style="--i:2" data-ref>
       <span class="rc-ic">🔗</span><span class="grow"><b>لينكك الشخصي + QR</b><span>ابعته للمناديب يسجّلوا بنفسهم ويتحسبوا ليك</span></span><span class="rc-go">${IC.chev}</span></button>` : ''}
 
     ${fcBig ? `<button class="fcast rise" style="--i:2" data-nav="couriers:${fc.active ? 'hired' : ''}">
@@ -810,10 +850,11 @@ async function jobs() {
   const VIEWS = [['cards', svg('<rect x="4" y="3" width="16" height="8" rx="2"/><rect x="4" y="13" width="16" height="8" rx="2"/>'), 'بطاقات'],
     ['list', svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'), 'قائمة'],
     ['group', svg('<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'), 'حسب الشركة'],
-    ['map', svg('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/>'), 'خريطة']];
+    feat('map') && ['map', svg('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/>'), 'خريطة']];
+  if (!feat('map') && S.jobView === 'map') S.jobView = 'cards';
   view(`
     <div class="page-h"><div><h2>الوظائف المتاحة</h2><p>${S.jobs.length} وظيفة — رشّح عليها واكسب بونص</p></div>
-      <div class="vt" role="group" aria-label="شكل العرض">${VIEWS.map(([v, ic, t]) => `<button data-view="${v}" class="${S.jobView === v ? 'on' : ''}" aria-label="${t}" title="${t}">${ic}</button>`).join('')}</div></div>
+      <div class="vt" role="group" aria-label="شكل العرض">${VIEWS.filter(Boolean).map(([v, ic, t]) => `<button data-view="${v}" class="${S.jobView === v ? 'on' : ''}" aria-label="${t}" title="${t}">${ic}</button>`).join('')}</div></div>
     <div class="srow"><label class="search">${IC.search}<input placeholder="ابحث بالشركة، المنطقة أو الوظيفة..." data-q></label>
       <button class="ibtn flt" data-flt aria-expanded="false" aria-label="فلاتر">${svg('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>')}<em class="dot-badge" hidden></em></button></div>
     ${cos.length > 1 ? `<div class="pills co-pills" data-f="co"><button class="pill ${!st.co ? 'on' : ''}" data-v="">كل الشركات</button>${cos.map((j) => {
@@ -1019,7 +1060,7 @@ function shareSheet(j) {
   const m = modal(`
     <div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">${IC.share}</div><div><h2>شارك الوظيفة</h2><p>${esc(j.title)} · ${esc(j.company)}</p></div></div>
     <div class="share-opts">
-      <button class="share-opt" data-s="img"><span>🖼️</span><b>صورة للستوري</b><em>صورة جاهزة بتصميم Full Speed لستوري واتساب وفيسبوك</em></button>
+      <button class="share-opt" data-s="img" ${feat('story') ? '' : 'hidden'}><span>🖼️</span><b>صورة للستوري</b><em>صورة جاهزة بتصميم Full Speed لستوري واتساب وفيسبوك</em></button>
       <button class="share-opt" data-s="txt"><span>💬</span><b>رسالة نصية</b><em>تفاصيل الوظيفة كرسالة على واتساب</em></button>
     </div>`);
   $('[data-s=txt]', m.el).onclick = () => { m.close(); track('share:text'); shareJob(j); };
@@ -1139,6 +1180,8 @@ async function flushQueue() {
 addEventListener('online', () => setTimeout(flushQueue, 800));
 
 function addCourier(job, pre = {}) {
+  if (RO) return toast('ده عرض بس 👀', 'bad');
+  if (S.summary?.freelancer?.frozen) return toast(errMsg('account_frozen'), 'bad');
   buzz(10);
   const comps = S.companies.filter((c) => c.active);
   const vSel = VEHICLES.includes(job?.vehicle) ? job.vehicle : VEHICLES[0];
@@ -1301,8 +1344,8 @@ async function wallet() {
   loading();
   await refreshSummary();
   const [w, l] = await Promise.all([
-    sb.from('withdrawals').select('id,amount,method,details,status,admin_note,created_at,decided_at').order('created_at', { ascending: false }),
-    sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,reverse_reason,note').order('earned_on', { ascending: false }),
+    sb.from('withdrawals').select('id,amount,method,details,status,admin_note,created_at,decided_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
+    sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,reverse_reason,note').eq('freelancer_id', S.summary.freelancer.id).order('earned_on', { ascending: false }),
   ]);
   if (!S.cands) await loadCands().catch(() => {});
   const cName = (id) => S.cands?.find((c) => c.id === id)?.name || '';
@@ -1401,6 +1444,8 @@ function earningsChart(led) {
   </section>`;
 }
 function requestWd(max) {
+  if (RO) return toast('ده عرض بس 👀', 'bad');
+  if (S.summary?.freelancer?.frozen) return toast(errMsg('account_frozen'), 'bad');
   const mob = S.summary.freelancer.mobile;
   const m = modal(`
     <div class="sheet-h"><div class="sheet-ic" style="--c:var(--g)">${IC.cash}</div>
@@ -1492,9 +1537,9 @@ async function me() {
         <div><b data-count="${Number(S.summary.balance?.total_earned) || 0}" data-money>${money(0)}</b><span>أرباحك</span></div>
       </div>
     </section>
-    ${f.ref_code ? `<button class="refcard rise" style="--i:1;margin-top:14px" data-ref>
+    ${f.ref_code && feat('join') ? `<button class="refcard rise" style="--i:1;margin-top:14px" data-ref>
       <span class="rc-ic">🔗</span><span class="grow"><b>لينكك الشخصي + QR</b><span>ابعته للمناديب يسجّلوا بنفسهم ويتحسبوا ليك</span></span><span class="rc-go">${IC.chev}</span></button>` : ''}
-    <button class="refcard chatcard rise" style="--i:1;margin-top:10px" data-chat>
+    <button class="refcard chatcard rise" style="--i:1;margin-top:10px" data-chat ${feat('chat') ? '' : 'hidden'}>
       <span class="rc-ic">💬</span><span class="grow"><b>كلّم الإدارة</b><span>اسأل عن مندوب أو طلب سحب</span></span><span class="rc-go">${IC.chev}</span></button>
     <section class="card rise" style="--i:1;margin-top:14px">
       <div class="bd-h"><h3>🏅 إنجازاتك</h3><span>${got} من ${bdg.length}</span></div>
@@ -1522,7 +1567,7 @@ async function me() {
     </section>
     <section class="card rise" style="--i:2;margin-top:14px" id="secCard">
       <h3>🔐 الدخول والإشعارات</h3>
-      <div class="set-row"><div class="grow"><b>الدخول بالبصمة أو الوش</b><span id="pkState">بنشوف...</span></div><button class="btn sec sm" id="pkBtn" hidden>فعّل</button></div>
+      <div class="set-row" ${feat('passkey') ? '' : 'hidden'}><div class="grow"><b>الدخول بالبصمة أو الوش</b><span id="pkState">بنشوف...</span></div><button class="btn sec sm" id="pkBtn" hidden>فعّل</button></div>
       <div class="pk-list" id="pkList"></div>
       <div class="set-row"><div class="grow"><b>إشعارات الموبايل</b><span id="pushState">بنشوف...</span></div><button class="btn sec sm" id="pushBtn" hidden>فعّل</button></div>
     </section>

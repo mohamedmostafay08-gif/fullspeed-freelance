@@ -792,3 +792,17 @@ body.join .blobs{position:fixed}
 .jn-lang{position:absolute;top:14px;inset-inline-end:max(16px,env(safe-area-inset-right));z-index:2;border:1px solid var(--line);background:var(--card);color:var(--ink2);border-radius:99px;padding:6px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--sh)}
 .jn-wrap{position:relative}
 html[dir="ltr"] .jn-jc,html[dir="ltr"] .jn-hero{text-align:left}
+
+/* ---- Banners (announcement / frozen / staff preview) + read-only mode ---- */
+.banners{max-width:660px;margin:0 auto;padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:8px}
+.banners:empty{display:none}
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:10px 14px;border-radius:16px;font-size:13.5px;font-weight:600;box-shadow:var(--sh);animation:rise .4s var(--spring) both;background:var(--sky-soft);color:#0a5b85}
+.banner.success{background:var(--g-soft);color:var(--g2)}
+.banner.warning,.banner.warn{background:var(--orange-soft);color:#a3480b}
+.banner.ro-b{background:#1f2937;color:#fff}
+.banner small{font-weight:500;opacity:.85}
+.banner .link{min-height:28px;padding:2px 6px;color:inherit;text-decoration:underline}
+.banner .x{margin-inline-start:auto;border:0;background:none;color:inherit;font-size:18px;cursor:pointer;opacity:.7}
+body.ro .fab,body.ro [data-apply],body.ro [data-add],body.ro .w-cta,body.ro .composer,body.ro .up-btn,body.ro #pf button,body.ro #pw button,
+body.ro #secCard,body.ro [data-logout],body.ro [data-empty-cta],body.ro .ibtn.add,body.ro .calc,body.ro [data-tour]{display:none!important}
+body.ro .dock{grid-template-columns:repeat(4,1fr)}
