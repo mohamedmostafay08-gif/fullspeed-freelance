@@ -470,6 +470,52 @@ label.f{font-weight:600;color:var(--ink2);font-size:13px}
 .bdg.ok b{color:var(--ink)}
 .bdg.ok em{color:var(--g2);font-weight:700}
 
+/* ---- Mobile hardening ---- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{overflow-x:clip;-webkit-tap-highlight-color:transparent}
+button,a,label,.tile,.pill,summary{touch-action:manipulation}
+button,.pill,.tab,.fab,.tile{-webkit-user-select:none;user-select:none}
+.in,.search input,select.in{font-size:16px}
+.link{min-height:40px;padding:8px 6px}
+.modal{max-height:92dvh}
+.dock{transition:transform .3s var(--ease),opacity .2s}
+body.kb .dock{transform:translate(-50%,160%);opacity:0;pointer-events:none}
+body.kb .wrap{padding-bottom:24px}
+.cc-top{flex-wrap:wrap;row-gap:8px}
+.cc-top .grow{min-width:150px}
+@media(max-width:374px){
+  .wrap{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .pills,.carousel,.marquee{margin:0 -12px;padding-left:12px;padding-right:12px}
+  .jcard,.ccard,.card{padding:14px 12px}
+  .jc-top{gap:8px}
+  .jc-top h4{font-size:15px}
+  .jlogo{width:44px;height:44px}
+  .ibtn{width:36px;height:36px;border-radius:12px}
+  .tiles{gap:10px}
+  .t-val{font-size:23px}
+  .w-pills{gap:6px}
+  .w-pills div{padding:8px}
+  .w-pills b{font-size:13px}
+  .mini3{gap:8px}
+  .mini3 b{font-size:13px}
+  .dock{width:calc(100% - 16px);grid-template-columns:1fr 1fr 62px 1fr 1fr;padding:5px}
+  .dock .tab{font-size:10px}
+  .dock .tab svg{width:21px;height:21px}
+  .fab{width:54px;height:54px;border-radius:19px}
+  .steps li{font-size:10px}
+  .ring,.ring svg{width:58px;height:58px}
+  .page-h h2{font-size:21px}
+}
+@media(max-height:620px){.tour-slide{min-height:0}.tour-art{width:80px;height:80px;font-size:38px;margin-bottom:10px}}
+
+/* ---- Install banner ---- */
+.install{display:flex;gap:12px;align-items:center;margin-top:14px;padding:12px 14px;border-radius:20px;background:linear-gradient(135deg,#eaf7ef,#fff3e8);border:1px solid #d9efe1;box-shadow:var(--sh)}
+.install img{width:42px;height:42px;border-radius:12px;background:#fff;flex:none;box-shadow:var(--sh)}
+.install .grow{min-width:0}
+.install b{display:block;font-size:14px}
+.install span{display:block;font-size:12px;color:var(--ink2)}
+.install .x{border:0;background:none;color:var(--mute);font-size:20px;width:32px;height:32px;cursor:pointer;flex:none}
+
 @media(prefers-reduced-motion:reduce){
   *,::before,::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }

@@ -18,6 +18,36 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } },
 };
 const ukey = (k) => `fsf-${k}-${S.summary?.freelancer?.id || 'x'}`;
+
+// Hide the floating dock while the on-screen keyboard is up.
+const isTextField = (el) => el?.matches?.('input:not([type=radio]):not([type=checkbox]),select,textarea');
+document.addEventListener('focusin', (e) => { if (isTextField(e.target)) document.body.classList.add('kb'); });
+document.addEventListener('focusout', () => setTimeout(() => { if (!isTextField(document.activeElement)) document.body.classList.remove('kb'); }, 120));
+
+let installEvt = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); installEvt = e;
+  if (S.view === 'home' && !$('#installCard') && $('.level')) { $('.level').insertAdjacentHTML('afterend', installCard()); bindInstall(); }
+});
+function installCard() {
+  if (standalone() || store.get('fsf-install-x', 0) || (!installEvt && !isIOS)) return '';
+  return `<div class="install rise" id="installCard"><img src="brand/fs-icon-192.png" alt="">
+    <div class="grow"><b>ثبّت التطبيق على موبايلك</b><span>${installEvt ? 'يفتح بسرعة وعلى الشاشة كلها زي أي تطبيق' : 'من زرار المشاركة ⬆️ في Safari اختار "إضافة إلى الشاشة الرئيسية"'}</span></div>
+    ${installEvt ? '<button class="btn pri sm" data-install>ثبّت</button>' : ''}<button class="x" data-install-x aria-label="إخفاء">×</button></div>`;
+}
+function bindInstall() {
+  const c = $('#installCard'); if (!c) return;
+  const b = $('[data-install]', c);
+  if (b) b.onclick = async () => {
+    installEvt.prompt();
+    const r = await installEvt.userChoice.catch(() => null);
+    installEvt = null; c.remove();
+    if (r?.outcome === 'accepted') { confetti(); toast('تم تثبيت التطبيق 🎉', 'ok'); }
+  };
+  $('[data-install-x]', c).onclick = () => { store.set('fsf-install-x', 1); c.remove(); };
+}
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const buzz = (ms = 8) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
@@ -365,6 +395,7 @@ async function home() {
           : 'وصلت لأعلى مستوى 👑 كمّل كده!'}</span>
       </span>
     </button>
+    ${installCard()}
 
     ${fcBig ? `<button class="fcast rise" style="--i:2" data-nav="couriers:${fc.active ? 'hired' : ''}">
       <span class="fc-ic">🚀</span>
@@ -414,6 +445,7 @@ async function home() {
     go(v);
   });
   bindJobActions($('#view'));
+  bindInstall();
 }
 function jobLogo(j) {
   const txt = (j.company || '?').slice(0, 2);
@@ -847,4 +879,5 @@ async function me() {
   };
 }
 
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 boot();

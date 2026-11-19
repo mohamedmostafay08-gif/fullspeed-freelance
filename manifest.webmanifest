@@ -1,0 +1,18 @@
+{
+  "name": "Full Speed Partners",
+  "short_name": "FS Partners",
+  "description": "رشّح مناديب واكسب بونص مع Full Speed",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f7f3",
+  "theme_color": "#f6f7f3",
+  "icons": [
+    { "src": "/brand/fs-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/fs-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/fs-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
