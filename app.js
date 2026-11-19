@@ -364,8 +364,12 @@ const targetDays = (companyId) => {
 };
 const findJob = (id) => S.jobs?.find((j) => String(j.id) === id);
 function bindJobActions(root) {
-  $$('[data-apply]', root).forEach((b) => b.onclick = () => addCourier(findJob(b.dataset.apply)));
-  $$('[data-share]', root).forEach((b) => b.onclick = () => shareSheet(findJob(b.dataset.share)));
+  $$('[data-apply]', root).forEach((b) => b.onclick = (e) => { e.stopPropagation(); addCourier(findJob(b.dataset.apply)); });
+  $$('[data-share]', root).forEach((b) => b.onclick = (e) => { e.stopPropagation(); shareSheet(findJob(b.dataset.share)); });
+  $$('[data-open]', root).forEach((el) => {
+    el.onclick = () => { buzz(5); jobSheet(findJob(el.dataset.open)); };
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+  });
   $$('.calc', root).forEach((c) => c.onclick = (e) => {
     const b = e.target.closest('[data-d]'); if (!b) return;
     const n = Math.min(20, Math.max(1, Number(c.dataset.n) + Number(b.dataset.d)));
@@ -481,6 +485,7 @@ async function home() {
   });
   bindJobActions($('#view'));
   bindInstall();
+  $$('.pl').forEach((b) => b.onclick = () => { buzz(8); S.jobCo = b.dataset.co; go('jobs'); });
 }
 function jobLogo(j) {
   const txt = (j.company || '?').slice(0, 2);
@@ -489,12 +494,13 @@ function jobLogo(j) {
 function partnersStrip() {
   const cs = S.companies.filter((c) => c.active && c.logo_url);
   if (cs.length < 3) return '';
-  const row = cs.map((c) => `<span class="pl" title="${esc(c.name)}">${logoImg(c.logo_url, c.name.slice(0, 2))}</span>`).join('');
-  return `<div class="sec-h"><h3>بنشتغل مع أكبر الشركات 🤝</h3></div>
+  const nJobs = (id) => (S.jobs || []).filter((j) => String(j.company_id) === String(id)).length;
+  const row = cs.map((c) => { const n = nJobs(c.id); return `<button class="pl" data-co="${esc(c.id)}" aria-label="وظايف ${esc(c.name)}">${logoImg(c.logo_url, c.name.slice(0, 2))}${n ? `<em>${n}</em>` : ''}</button>`; }).join('');
+  return `<div class="sec-h"><h3>بنشتغل مع أكبر الشركات 🤝</h3><span class="sec-sub">دوس على أي شركة</span></div>
     <div class="marquee" aria-label="الشركات"><div class="mq-track">${row}${row}</div></div>`;
 }
 function miniJob(j, i) {
-  return `<article class="mjob rise" style="--h:${hue(j.company)};--i:${6 + Math.min(i, 3)}">
+  return `<article class="mjob rise" style="--h:${hue(j.company)};--i:${6 + Math.min(i, 3)}" data-open="${esc(j.id)}">
     <div class="mj-top">${jobLogo(j)}<div class="mj-t"><b>${esc(j.title)}</b><span>${esc(j.company)}</span></div></div>
     <div class="mj-loc">${IC.pin}<span>${esc(j.gov || '—')}${j.region ? ' — ' + esc(j.region) : ''}</span></div>
     <div class="mj-bonus">${IC.gift}<span>${esc(j.bonus_text || 'بونص للشريك')}</span></div>
@@ -508,15 +514,29 @@ async function jobs() {
   const err = await loadJobs();
   if (err) return view(empty('⚠️', 'مقدرناش نحمّل الوظائف', errMsg(err)));
   const govs = [...new Set(S.jobs.map((j) => j.gov).filter(Boolean))];
-  const st = { q: '', gov: '', veh: '', only: '' };
+  const st = { q: '', gov: '', veh: '', only: '', co: S.jobCo || '' };
+  S.jobCo = '';
   JOBCTX.seen = store.get(ukey('seen'), null);
   JOBCTX.fav = new Set(store.get(ukey('fav'), []));
+  S.jobView = store.get(ukey('jview'), 'cards');
   const myGov = S.summary.freelancer.gov;
   const nNew = S.jobs.filter((j) => jobIsNew(j, JOBCTX.seen)).length;
   const nMine = S.jobs.filter((j) => j.gov === myGov).length;
+  const cos = [...new Map(S.jobs.filter((j) => j.company_id).map((j) => [String(j.company_id), j])).values()];
+  const coCount = (id) => S.jobs.filter((j) => String(j.company_id) === id).length;
+  const VIEWS = [['cards', svg('<rect x="4" y="3" width="16" height="8" rx="2"/><rect x="4" y="13" width="16" height="8" rx="2"/>'), 'بطاقات'],
+    ['list', svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'), 'قائمة'],
+    ['group', svg('<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'), 'حسب الشركة']];
   view(`
-    <div class="page-h"><div><h2>الوظائف المتاحة</h2><p>${S.jobs.length} وظيفة — رشّح عليها واكسب بونص</p></div></div>
-    <label class="search">${IC.search}<input placeholder="ابحث بالشركة، المنطقة أو الوظيفة..." data-q></label>
+    <div class="page-h"><div><h2>الوظائف المتاحة</h2><p>${S.jobs.length} وظيفة — رشّح عليها واكسب بونص</p></div>
+      <div class="vt" role="group" aria-label="شكل العرض">${VIEWS.map(([v, ic, t]) => `<button data-view="${v}" class="${S.jobView === v ? 'on' : ''}" aria-label="${t}" title="${t}">${ic}</button>`).join('')}</div></div>
+    <div class="srow"><label class="search">${IC.search}<input placeholder="ابحث بالشركة، المنطقة أو الوظيفة..." data-q></label>
+      <button class="ibtn flt" data-flt aria-expanded="false" aria-label="فلاتر">${svg('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>')}<em class="dot-badge" hidden></em></button></div>
+    ${cos.length > 1 ? `<div class="pills co-pills" data-f="co"><button class="pill ${!st.co ? 'on' : ''}" data-v="">كل الشركات</button>${cos.map((j) => {
+      const id = String(j.company_id);
+      return `<button class="pill co ${st.co === id ? 'on' : ''}" data-v="${esc(id)}"><span class="pl-mini">${j.logo_url ? logoImg(j.logo_url, '') : ''}</span>${esc(j.company)} <em>${coCount(id)}</em></button>`;
+    }).join('')}</div>` : ''}
+    <div class="flt-box" hidden>
     <div class="pills" data-f="only">
       <button class="pill on" data-v="">كل الوظايف</button>
       ${nNew ? `<button class="pill" data-v="new">✨ الجديدة <em>${nNew}</em></button>` : ''}
@@ -525,32 +545,84 @@ async function jobs() {
     </div>
     ${govs.length > 1 ? `<div class="pills" data-f="gov"><button class="pill on" data-v="">كل المحافظات</button>${govs.map((g) => `<button class="pill" data-v="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
     <div class="pills" data-f="veh"><button class="pill on" data-v="">كل المركبات</button>${VEHICLES.map((v) => `<button class="pill" data-v="${esc(v)}">${VEH_EMOJI[v] || ''} ${esc(v)}</button>`).join('')}</div>
+    </div>
     <div class="list" id="jobList"></div>`);
   const render = () => {
     const q = st.q.toLowerCase();
+    const nf = [st.only, st.gov, st.veh].filter(Boolean).length, fb = $('[data-flt] .dot-badge');
+    fb.textContent = nf; fb.hidden = !nf;
     const list = S.jobs.filter((j) => (!st.gov || j.gov === st.gov) && (!st.veh || j.vehicle === st.veh) &&
+      (!st.co || String(j.company_id) === st.co) &&
       (st.only !== 'new' || jobIsNew(j, JOBCTX.seen)) && (st.only !== 'mine' || j.gov === myGov) &&
       (st.only !== 'fav' || JOBCTX.fav.has(String(j.id))) &&
       (!q || [j.company, j.title, j.gov, j.region, j.pricing].join(' ').toLowerCase().includes(q)));
     const box = $('#jobList');
-    box.innerHTML = list.length ? list.map(jobCard).join('')
+    const coName = st.co && S.companies.find((c) => String(c.id) === st.co)?.name;
+    box.className = 'list jv-' + S.jobView;
+    box.innerHTML = list.length ? renderJobs(list)
       : st.only === 'fav' ? empty('🤍', 'لسه مفيش وظايف مفضلة', 'دوس على القلب في أي وظيفة عشان تلاقيها هنا بسرعة.')
-        : empty('🔍', 'مفيش وظائف مطابقة', 'جرّب تغيّر الفلتر أو تمسح البحث.');
+        : coName && !coCount(st.co) ? empty('🏢', `مفيش وظايف متاحة لـ ${coName} دلوقتي`, 'أول ما تنزل وظيفة جديدة ليها هتلاقيها هنا.', 'شوف كل الوظايف')
+          : empty('🔍', 'مفيش وظائف مطابقة', 'جرّب تغيّر الفلتر أو تمسح البحث.');
+    const cta = $('[data-empty-cta]', box);
+    if (cta) cta.onclick = () => { st.co = ''; $$('[data-f=co] .pill').forEach((p) => p.classList.toggle('on', !p.dataset.v)); render(); };
     bindJobActions(box); animateIn(box);
-    $$('[data-fav]', box).forEach((b) => b.onclick = () => {
-      const id = b.dataset.fav, on = !JOBCTX.fav.has(id);
-      if (on) JOBCTX.fav.add(id); else JOBCTX.fav.delete(id);
-      store.set(ukey('fav'), [...JOBCTX.fav]);
-      b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); buzz(on ? 12 : 5);
-      $('[data-favn]').textContent = S.jobs.filter((j) => JOBCTX.fav.has(String(j.id))).length;
-      if (st.only === 'fav' && !on) render();
-    });
+    bindFav(box, () => { $('[data-favn]').textContent = S.jobs.filter((j) => JOBCTX.fav.has(String(j.id))).length; if (st.only === 'fav') render(); });
   };
   store.set(ukey('seen'), new Date().toISOString());
   $('#jobsBadge').hidden = true;
   $('[data-q]').oninput = (e) => { st.q = e.target.value.trim(); render(); };
   bindPills($('#view'), st, render);
+  $('[data-flt]').onclick = (e) => {
+    const box = $('.flt-box'), open = box.hidden; box.hidden = !open; buzz(5);
+    e.currentTarget.setAttribute('aria-expanded', open); e.currentTarget.classList.toggle('on', open);
+  };
+  $$('[data-view]').forEach((b) => b.onclick = () => {
+    S.jobView = b.dataset.view; store.set(ukey('jview'), S.jobView); buzz(5);
+    $$('[data-view]').forEach((x) => x.classList.toggle('on', x === b)); render();
+  });
   render();
+  $('[data-f=co] .pill.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+function renderJobs(list) {
+  if (S.jobView === 'list') return list.map(jobRow).join('');
+  if (S.jobView === 'group') {
+    const groups = new Map();
+    list.forEach((j) => { const k = String(j.company_id || j.company); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(j); });
+    return [...groups.values()].map((js, gi) => {
+      const j = js[0], max = ladderOf(j.company_id).max;
+      return `<section class="jgroup rise" style="--i:${Math.min(gi, 6)};--h:${hue(j.company)}">
+        <div class="jg-h">${jobLogo(j)}<div class="grow"><b>${esc(j.company)}</b><span>${js.length} ${js.length === 1 ? 'وظيفة' : 'وظايف'}${max ? ` · لحد ${money(max)} للمندوب` : ''}</span></div></div>
+        <div class="carousel">${js.map((x, k) => miniJob(x, k)).join('')}</div>
+      </section>`;
+    }).join('');
+  }
+  return list.map(jobCard).join('');
+}
+function jobRow(j, i) {
+  const max = ladderOf(j.company_id).max, isNew = jobIsNew(j, JOBCTX.seen);
+  return `<article class="jrow rise" style="--i:${Math.min(i, 10)};--h:${hue(j.company)}" data-open="${esc(j.id)}" role="button" tabindex="0">
+    ${jobLogo(j)}
+    <div class="grow"><b>${esc(j.title)}${isNew ? ' <span class="new-tag">جديد</span>' : ''}</b>
+      <span>${esc(j.company)} · ${esc(j.gov || '—')}${j.region ? ' — ' + esc(j.region) : ''}</span>
+      <span class="jr-t">${j.vehicle ? `${VEH_EMOJI[j.vehicle] || ''} ${esc(j.vehicle)}` : ''}${j.pricing ? ` · ${esc(j.pricing)}` : ''}</span></div>
+    <div class="jr-end">${max ? `<span class="jr-bonus">🎁 ${money(max)}</span>` : ''}<button class="ibtn add" data-apply="${esc(j.id)}" aria-label="رشّح مندوب على ${esc(j.title)}">${IC.plus}</button></div>
+  </article>`;
+}
+function jobSheet(j) {
+  if (!j) return;
+  const m = modal(`<div class="sheet-job">${jobCard(j, 0)}</div>`);
+  bindJobActions(m.el); bindFav(m.el); animateIn(m.el);
+  $$('[data-apply],[data-share]', m.el).forEach((b) => b.addEventListener('click', () => m.close()));
+}
+function bindFav(root, after) {
+  $$('[data-fav]', root).forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const id = b.dataset.fav, on = !JOBCTX.fav.has(id);
+    if (on) JOBCTX.fav.add(id); else JOBCTX.fav.delete(id);
+    store.set(ukey('fav'), [...JOBCTX.fav]);
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); buzz(on ? 12 : 5);
+    after?.();
+  });
 }
 const JOBCTX = { seen: null, fav: new Set() };
 const HEART = svg('<path d="M12 20s-7.5-4.6-9.3-9.2C1.4 7.4 3.6 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8C19.5 15.4 12 20 12 20Z"/>');
