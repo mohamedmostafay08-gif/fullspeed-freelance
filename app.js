@@ -706,10 +706,15 @@ async function jobs() {
     const box = $('#jobList');
     const coName = st.co && S.companies.find((c) => String(c.id) === st.co)?.name;
     box.className = 'list jv-' + S.jobView;
-    box.innerHTML = list.length ? renderJobs(list)
+    const fkey = JSON.stringify([st, S.jobView]);
+    if (fkey !== JOBCTX.fkey) { JOBCTX.fkey = fkey; JOBCTX.shown = 20; }
+    box.innerHTML = list.length ? renderJobs(list.slice(0, JOBCTX.shown))
+        + (list.length > JOBCTX.shown ? `<button class="btn sec block" data-more>اعرض وظايف أكتر (فاضل ${list.length - JOBCTX.shown})</button>` : '')
       : st.only === 'fav' ? empty('🤍', 'لسه مفيش وظايف مفضلة', 'دوس على القلب في أي وظيفة عشان تلاقيها هنا بسرعة.')
         : coName && !coCount(st.co) ? empty('🏢', `مفيش وظايف متاحة لـ ${coName} دلوقتي`, 'أول ما تنزل وظيفة جديدة ليها هتلاقيها هنا.', 'شوف كل الوظايف')
           : empty('🔍', 'مفيش وظائف مطابقة', 'جرّب تغيّر الفلتر أو تمسح البحث.');
+    const moreBtn = $('[data-more]', box);
+    if (moreBtn) moreBtn.onclick = () => { JOBCTX.shown += 20; buzz(5); render(); };
     const cta = $('[data-empty-cta]', box);
     if (cta) cta.onclick = () => { st.co = ''; $$('[data-f=co] .pill').forEach((p) => p.classList.toggle('on', !p.dataset.v)); render(); };
     bindJobActions(box); animateIn(box);
@@ -771,7 +776,7 @@ function bindFav(root, after) {
     after?.();
   });
 }
-const JOBCTX = { seen: null, fav: new Set() };
+const JOBCTX = { seen: null, fav: new Set(), shown: 20, fkey: '' };
 const HEART = svg('<path d="M12 20s-7.5-4.6-9.3-9.2C1.4 7.4 3.6 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8C19.5 15.4 12 20 12 20Z"/>');
 function jobCard(j, i) {
   const id = String(j.id), fav = JOBCTX.fav.has(id), isNew = jobIsNew(j, JOBCTX.seen);

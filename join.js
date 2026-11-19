@@ -37,16 +37,11 @@ async function start() {
       <h1>🚀 ${esc(data.partner || 'صاحبك')} بيدعوك تشتغل مع <span class="grad">Full Speed</span></h1>
       <p>اختار الوظيفة اللي تناسبك وسجّل بياناتك في دقيقة — هنكلمك ونكمّل معاك.</p>
     </header>
-    <section class="jn-step"><h2><i>1</i> اختار الوظيفة</h2>
-      <div class="jn-jobs">${jobs.map((j, k) => `<label class="jn-job rise" style="--i:${Math.min(k, 8)}">
-        <input type="radio" name="job" value="${esc(j.id)}" ${jobs.length === 1 ? 'checked' : ''}>
-        <span class="jn-jc">
-          <span class="jlogo" style="--h:${(j.company || '').length * 37 % 360}">${j.logo_url ? logoImg(j.logo_url, (j.company || '').slice(0, 2)) : esc((j.company || '?').slice(0, 2))}</span>
-          <span class="grow"><b>${esc(j.title)}</b><span>${esc(j.company || '')} · 📍 ${esc([j.gov, j.region].filter(Boolean).join(' — '))}</span>
-            <span class="jn-tags">${j.vehicle ? `<em>${VEH_EMOJI[j.vehicle] || '🛵'} ${esc(j.vehicle)}</em>` : ''}${j.work_type ? `<em>${esc(j.work_type)}</em>` : ''}</span>
-            ${j.pricing ? `<span class="jn-pay">💰 ${esc(j.pricing)}</span>` : ''}</span>
-          <span class="jn-check" aria-hidden="true">✓</span>
-        </span></label>`).join('')}</div>
+    <section class="jn-step"><h2><i>1</i> اختار الوظيفة <small class="muted">(${jobs.length})</small></h2>
+      ${jobs.length > 6 ? `<div class="jn-flt"><label class="search"><input placeholder="دوّر بالمنطقة أو الشركة أو الوظيفة..." data-q></label>
+        <select class="in" data-gov><option value="">كل المحافظات</option>${[...new Set(jobs.map((j) => j.gov).filter(Boolean))].sort().map((g) => `<option>${esc(g)}</option>`).join('')}</select></div>` : ''}
+      <div class="jn-jobs"></div>
+      <button type="button" class="btn sec block jn-more" hidden>اعرض وظايف أكتر</button>
     </section>
     <section class="jn-step"><h2><i>2</i> بياناتك</h2>
       <form class="card stack" id="jf" novalidate>
@@ -60,10 +55,32 @@ async function start() {
       </form>
     </section>`);
   loadTurnstile();
+  let sel = jobs.length === 1 ? String(jobs[0].id) : '', shown = 20;
+  const card = (j, k) => `<label class="jn-job rise" style="--i:${Math.min(k, 8)}">
+    <input type="radio" name="job" value="${esc(j.id)}" ${String(j.id) === sel ? 'checked' : ''}>
+    <span class="jn-jc">
+      <span class="jlogo" style="--h:${(j.company || '').length * 37 % 360}">${j.logo_url ? logoImg(j.logo_url, (j.company || '').slice(0, 2)) : esc((j.company || '?').slice(0, 2))}</span>
+      <span class="grow"><b>${esc(j.title)}</b><span>${esc(j.company || '')} · 📍 ${esc([j.gov, j.region].filter(Boolean).join(' — '))}</span>
+        <span class="jn-tags">${j.vehicle ? `<em>${VEH_EMOJI[j.vehicle] || '🛵'} ${esc(j.vehicle)}</em>` : ''}${j.work_type ? `<em>${esc(j.work_type)}</em>` : ''}</span>
+        ${j.pricing ? `<span class="jn-pay">💰 ${esc(j.pricing)}</span>` : ''}</span>
+      <span class="jn-check" aria-hidden="true">✓</span>
+    </span></label>`;
+  const listEl = $('.jn-jobs'), more = $('.jn-more');
+  const render = () => {
+    const q = ($('[data-q]')?.value || '').trim().toLowerCase(), g = $('[data-gov]')?.value || '';
+    const list = jobs.filter((j) => (!g || j.gov === g) && (!q || [j.title, j.company, j.gov, j.region].join(' ').toLowerCase().includes(q)));
+    listEl.innerHTML = list.length ? list.slice(0, shown).map(card).join('') : '<p class="muted" style="text-align:center">مفيش وظايف مطابقة — جرّب كلمة تانية.</p>';
+    more.hidden = list.length <= shown;
+    $$('input[name=job]', listEl).forEach((r) => r.onchange = () => { sel = r.value; });
+  };
+  $('[data-q]')?.addEventListener('input', () => { shown = 20; render(); });
+  $('[data-gov]')?.addEventListener('change', () => { shown = 20; render(); });
+  more.onclick = () => { shown += 20; render(); };
+  render();
   const f = $('#jf'), err = $('[data-err]', f);
   f.onsubmit = async (e) => {
     e.preventDefault(); err.textContent = '';
-    const job = $('input[name=job]:checked')?.value;
+    const job = sel;
     if (!job) { err.textContent = 'اختار الوظيفة الأول من فوق.'; $('.jn-jobs').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     if (!f.name.value.trim() || !/^1[0125]\d{8}$/.test(normMobile(f.mobile.value))) { err.textContent = ERR.invalid_input; return; }
     if (TURNSTILE_SITE_KEY && !tsToken) { err.textContent = ERR.captcha; return; }

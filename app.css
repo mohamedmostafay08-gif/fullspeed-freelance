@@ -745,3 +745,9 @@ body.join .blobs{position:fixed}
 #ts:empty{display:none}
 
 [hidden]{display:none!important}
+
+.jn-flt{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:10px}
+.jn-flt .search input{padding:12px 0}
+.jn-flt select.in{width:auto;max-width:150px}
+.jn-more{margin-top:10px}
+.jn-step h2 small{font-weight:500;font-size:13px}
