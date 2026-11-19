@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7f3">
+  <title>Full Speed Partners — شركاء التوظيف</title>
+  <link rel="icon" type="image/png" href="brand/fs-icon-512.png">
+  <link rel="apple-touch-icon" href="brand/fs-icon-512.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300..700&display=swap">
+  <link rel="stylesheet" href="shared/common.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="splash" aria-hidden="true">
+    <div class="sp-in"><img src="brand/fs-mark.png" alt="" width="256" height="256"><b>Full Speed</b><small>PARTNERS</small><div class="sp-bar"><i></i></div></div>
+  </div>
+  <!-- ===== Auth ===== -->
+  <section id="auth" class="auth hidden">
+    <div class="blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="auth-wrap">
+      <div class="auth-hero">
+        <img class="brand-logo" src="brand/fs-logo.png" alt="Full Speed — The Future of Logistics" width="640" height="640">
+        <h1>رشّح مناديب<br><span class="grad">واكسب مع كل يوم شغل</span></h1>
+        <div class="perks"><span>💸 بونص لكل مندوب</span><span>⚡ سحب سريع</span><span>📈 تابع أرباحك أول بأول</span></div>
+      </div>
+      <div class="auth-card">
+        <div class="seg" data-on="login"><button data-tab="login" class="on">تسجيل الدخول</button><button data-tab="register">حساب جديد</button></div>
+
+        <form id="loginForm" class="stack" autocomplete="on">
+          <div><label class="f">رقم الموبايل</label><input class="in mono" name="id" autocomplete="username" required inputmode="tel" placeholder="01xxxxxxxxx"></div>
+          <div><label class="f">كلمة المرور</label><input class="in" name="pw" type="password" autocomplete="current-password" required></div>
+          <div class="err" data-err></div>
+          <button class="btn pri block">يلا بينا</button>
+          <p class="muted small" style="text-align:center;margin:0">نسيت كلمة المرور؟ كلم الإدارة وهتتعمل لك كلمة مرور جديدة.</p>
+        </form>
+
+        <form id="regForm" class="stack hidden" autocomplete="on">
+          <div><label class="f">الاسم بالكامل</label><input class="in" name="name" required maxlength="120"></div>
+          <div class="grid2">
+            <div><label class="f">رقم الموبايل</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx"></div>
+            <div><label class="f">الإيميل (اختياري)</label><input class="in mono" name="email" type="email"></div>
+          </div>
+          <div class="grid2">
+            <div><label class="f">المحافظة</label><select class="in" name="gov" required data-govs></select></div>
+            <div><label class="f">المنطقة</label><input class="in" name="region" required maxlength="100"></div>
+          </div>
+          <div class="grid2">
+            <div><label class="f">كلمة المرور</label><input class="in" name="pw" type="password" minlength="6" required autocomplete="new-password"></div>
+            <div><label class="f">تأكيد كلمة المرور</label><input class="in" name="pw2" type="password" minlength="6" required autocomplete="new-password"></div>
+          </div>
+          <div class="err" data-err></div>
+          <button class="btn pri block">إنشاء الحساب</button>
+          <p class="muted small" style="text-align:center;margin:0">بعد التسجيل الإدارة بتراجع حسابك وتفعّله.</p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Pending / inactive ===== -->
+  <section id="waiting" class="auth hidden">
+    <div class="blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="auth-card wait">
+      <img class="brand-mark" src="brand/fs-mark.png" alt="Full Speed">
+      <div class="hourglass" aria-hidden="true">⏳</div>
+      <h2 id="waitTitle">حسابك قيد المراجعة</h2>
+      <p class="muted" id="waitText">الإدارة هتراجع بياناتك وتفعّل حسابك قريب.</p>
+      <div class="row" style="justify-content:center;margin-top:14px">
+        <button class="btn pri" id="waitRefresh">تحديث</button><button class="btn sec" data-logout>خروج</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== App ===== -->
+  <section id="app" class="hidden">
+    <header class="top">
+      <button class="me-btn" id="meBtn" aria-label="حسابي"><span id="av">FS</span></button>
+      <div class="hello"><span id="greet">أهلاً</span><b id="hello"></b></div>
+      <button class="lv-chip" id="lvChip" aria-label="مستواك"></button>
+    </header>
+    <main id="view" class="wrap"></main>
+    <nav class="dock" aria-label="التنقل">
+      <button class="tab on" data-go="home" style="--c:var(--g2);--cs:var(--g-soft)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>الرئيسية</span></button>
+      <button class="tab" data-go="jobs" style="--c:var(--orange);--cs:var(--orange-soft)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></svg><span>الوظائف</span><em class="dot-badge" id="jobsBadge" hidden></em></button>
+      <button class="fab" id="fab" aria-label="رشّح مندوب"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="tab" data-go="couriers" style="--c:var(--sky);--cs:var(--sky-soft)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-6 6.5-6s5.9 2.4 6.5 6"/><circle cx="17" cy="9" r="2.6"/><path d="M17 14c2.5 0 4.3 1.8 4.8 4.5"/></svg><span>مناديبي</span></button>
+      <button class="tab" data-go="wallet" style="--c:#d98a00;--cs:var(--sun-soft)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5.5A2.5 2.5 0 0 0 16.5 3h-11A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h13a2.5 2.5 0 0 0 2.5-2.5V16"/><path d="M21 9h-5a3 3 0 0 0 0 6h5z"/></svg><span>المحفظة</span></button>
+    </nav>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

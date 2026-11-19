@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Full Speed — لوحة الإدارة</title>
+  <link rel="icon" type="image/png" href="../brand/fs-icon-512.png">
+  <link rel="stylesheet" href="../shared/common.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <section id="auth" class="auth hidden">
+    <div class="card" style="width:100%;max-width:400px;padding:22px">
+      <div class="brand" style="justify-content:center;margin-bottom:12px"><div class="logo fs"><img src="../brand/fs-mark.png" alt="Full Speed"></div><div><b>Full Speed</b><span>ADMIN CONTROL PANEL</span></div></div>
+      <form id="loginForm" class="stack">
+        <div><label class="f">الإيميل</label><input class="in mono" name="email" type="email" required autocomplete="username"></div>
+        <div><label class="f">كلمة المرور</label><input class="in" name="pw" type="password" required autocomplete="current-password"></div>
+        <div class="err" data-err></div>
+        <button class="btn pri block">دخول</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="noaccess" class="auth hidden">
+    <div class="card" style="max-width:420px;text-align:center">
+      <h2 style="margin-top:0">مفيش صلاحية إدارة</h2>
+      <p class="muted">الحساب <b id="naEmail" class="mono"></b> مش مضاف لفريق الإدارة أو موقوف. اطلب من المالك يضيفك.</p>
+      <button class="btn sec" data-logout>خروج</button>
+    </div>
+  </section>
+
+  <section id="app" class="layout hidden">
+    <aside class="side">
+      <div class="brand" style="padding:6px 6px 14px"><div class="logo fs"><img src="../brand/fs-mark.png" alt="Full Speed"></div><div><b>Full Speed</b><span>ADMIN</span></div></div>
+      <nav id="nav"></nav>
+      <div class="me small"><div id="meEmail" class="mono"></div><div id="meRole" class="muted"></div>
+        <div class="row" style="margin-top:6px"><button class="btn sec sm" id="myPw">كلمة المرور</button><button class="btn ghost sm" data-logout>خروج</button></div></div>
+    </aside>
+    <main class="main"><div id="view"></div></main>
+  </section>
+
+  <script type="module" src="admin.js"></script>
+</body>
+</html>
