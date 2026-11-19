@@ -159,6 +159,11 @@ export function filters(page, { tools, date = null, adopt = [], dims = [], onCha
     get: (key) => { const a = adopted.find((x) => x.key === key); return a ? a.node.value : st.sel[key] || ''; },
     // set from a chart click; clicking the active value again clears it
     set(key, v) {
+      if (key === '@month') { // a month column: narrow the date range to that month (click again to undo)
+        const [y, m] = v.split('-').map(Number), a = ymd(new Date(y, m - 1, 1)), b = ymd(new Date(y, m, 0));
+        if (st.range === 'custom' && st.from === a && st.to === b) st.range = defRange; else { st.range = 'custom'; st.from = a; st.to = b; }
+        syncDate(); changed(); return;
+      }
       const a = adopted.find((x) => x.key === key);
       if (a) {
         const nv = a.node.value === v ? a.def : v;

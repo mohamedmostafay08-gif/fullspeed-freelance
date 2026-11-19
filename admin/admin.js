@@ -6,6 +6,7 @@ import {
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../shared/config.js';
 import { initI18n, isEn } from './i18n.js';
 import { mountTopbar, mountAuthTools, applyTheme } from './topbar.js';
+import * as AX from './analytics.js';
 
 applyTheme();
 initI18n();
@@ -243,40 +244,15 @@ async function dash() {
       <div class="card"><h3>المناديب الشغالين حسب الشركة</h3>${topComp.map(([n, v]) => `<div class="hbar"><span class="l">${esc(n)}</span><span class="b"><i style="width:${v / maxC * 100}%"></i></span><span class="n">${v}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
       <div class="card"><h3>أعلى الشركاء أرباحاً</h3>${topFl.map(({ f, e }) => `<div class="hbar"><span class="l">${esc(f.name)}</span><span class="b"><i style="width:${e / maxF * 100}%;background:var(--amber)"></i></span><span class="n">${Math.round(e)}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
     </div>
-    ${funnelHtml(cands)}
+    <div id="axDash"></div>
     ${staleHtml(cands)}
     <div id="usageCard"></div>`);
   usageCard().catch(() => {});
+  AX.dashboard($('#axDash'), { S, compName, flName }).catch((e) => { $('#axDash').innerHTML = `<div class="card empty">${esc(errMsg(e))}</div>`; });
   $$('[data-stale]').forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.stale)]));
   const sa = $('[data-stale-all]'); if (sa) sa.onclick = () => { S.courSt = 'submitted'; go('couriers'); };
 }
 
-// Candidate journey: every stage counts candidates that reached it (not rejected).
-function funnelStats(list) {
-  const live = list.filter((c) => c.status !== 'rejected');
-  return {
-    total: list.length,
-    accepted: live.filter((c) => c.status !== 'submitted').length,
-    paper: live.filter((c) => c.paper_date).length,
-    started: live.filter((c) => c.start_date).length,
-    hired: list.filter((c) => c.status === 'hired').length,
-  };
-}
-function funnelHtml(cands) {
-  const s = funnelStats(cands);
-  const pct = (n) => (s.total ? Math.round((n / s.total) * 100) : 0);
-  const stages = [['الترشيحات', s.total], ['اتقبلوا بعد المراجعة', s.accepted], ['خلّصوا الورق', s.paper], ['بدأوا شغل', s.started], ['شغالين دلوقتي', s.hired]];
-  const byCo = new Map();
-  cands.forEach((c) => { const k = c.company_id || 'none'; if (!byCo.has(k)) byCo.set(k, []); byCo.get(k).push(c); });
-  const rows = [...byCo.entries()].map(([k, l]) => ({ name: k === 'none' ? (l[0].company_name || 'بدون شركة') : compName(k, l[0].company_name), ...funnelStats(l) }))
-    .sort((a, b) => b.total - a.total).slice(0, 10);
-  return `<div class="card" style="margin-top:12px"><h3>رحلة المندوب (Funnel)</h3>
-    <p class="small muted" style="margin:-4px 0 10px">كل مرحلة = عدد المناديب اللي وصلوها من إجمالي الترشيحات (المرفوضين مش محسوبين في المراحل).</p>
-    <div class="funnel">${stages.map(([t, n]) => `<div class="fn-row"><span class="fn-l">${t}</span><span class="fn-b"><i style="width:${s.total ? Math.max(2, (n / s.total) * 100) : 0}%"></i></span><span class="fn-n"><b>${n}</b> <span class="muted">${pct(n)}%</span></span></div>`).join('')}</div>
-    <div class="tw" style="margin-top:12px"><table class="t"><thead><tr><th>الشركة</th><th>ترشيحات</th><th>ورق</th><th>بدأوا</th><th>شغالين</th><th>نسبة التعيين</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.total}</td><td>${r.paper}</td><td>${r.started}</td><td>${r.hired}</td><td><span class="chip ${r.total && r.hired / r.total >= 0.3 ? 'g' : 'n'}">${r.total ? Math.round((r.hired / r.total) * 100) : 0}%</span></td></tr>`).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}
-    </tbody></table></div></div>`;
-}
 function staleHtml(cands) {
   const cutoff = Date.now() - 48 * 3600 * 1000;
   const stale = cands.filter((c) => c.status === 'submitted' && new Date(c.created_at).getTime() < cutoff)
@@ -321,7 +297,8 @@ async function partners() {
   const render = () => {
     const q = $('[data-q]').value.trim().toLowerCase(), st = $('[data-st]').value, g = $('[data-gov]').value;
     rows = S.fl.filter((f) => (st === 'DUP' ? f.duplicate_of : (!f.duplicate_of && (!st || f.status === st))) && (!g || f.gov === g) &&
-      (!q || [f.name, f.mobile, '0' + f.mobile, f.email, f.region].join(' ').toLowerCase().includes(q)));
+      (!q || [f.name, f.mobile, '0' + f.mobile, f.email, f.region].join(' ').toLowerCase().includes(q)) && FX.match(f));
+    FX.draw(rows);
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (f) => f.duplicate_of ? '' : `<input type="checkbox" data-sel="${f.id}" ${sel.has(f.id) ? 'checked' : ''}>`],
       ['التاريخ', (f) => `<span class="small">${fmtDate(f.created_at)}</span>`],
@@ -390,6 +367,7 @@ async function partners() {
     });
   };
   $$('[data-q],[data-st],[data-gov]').forEach((el) => el.oninput = render);
+  const FX = AX.partnersFx({ S, onChange: () => render() });
   $('[data-csv]').onclick = () => csvDownload('FullSpeed_Partners.csv',
     ['التاريخ', 'الاسم', 'الموبايل', 'الإيميل', 'المحافظة', 'المنطقة', 'الحالة', 'المناديب', 'شغالين', 'إجمالي الأرباح', 'اتصرف', 'قيد المراجعة', 'الرصيد'],
     rows.map((f) => { const b = bMap.get(f.id) || {}; return [fmtDate(f.created_at), f.name, '0' + f.mobile, f.email, f.gov, f.region, f.status, cc[f.id]?.t ?? 0, cc[f.id]?.h ?? 0, b.total_earned, b.paid, b.pending, b.balance]; }));
@@ -795,7 +773,7 @@ async function couriers() {
   ]);
   const earned = {}; led.forEach((l) => { if (l.candidate_id) earned[l.candidate_id] = (earned[l.candidate_id] || 0) + Number(l.amount); });
   const jMap = new Map((jobsR.data || []).map((j) => [j.id, j]));
-  const rulesR = await sb.from('bonus_rules').select('company_id,kind,min_days').eq('active', true);
+  const rulesR = await sb.from('bonus_rules').select('company_id,kind,min_days,amount').eq('active', true);
   const tgt = {}; (rulesR.data || []).forEach((r) => { if (r.kind === 'days') tgt[r.company_id] = Math.max(tgt[r.company_id] || 0, r.min_days); });
   const sel = new Set();
   const perFl = {}; cands.forEach((c) => { perFl[c.freelancer_id] = (perFl[c.freelancer_id] || 0) + 1; });
@@ -825,9 +803,10 @@ async function couriers() {
     $('#tbl').classList.toggle('hidden', board); $('#board').classList.toggle('hidden', !board); $('[data-st]').classList.toggle('hidden', board);
     $$('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === S.courMode));
     const q = $('[data-q]').value.trim().toLowerCase(), st = board ? '' : $('[data-st]').value, co = $('[data-co]').value, due = $('[data-due]').value, fl = $('[data-fl]').value;
-    rows = cands.filter((c) => (!st || c.status === st) && (!fl || c.freelancer_id === fl) && (!co || (co === 'NONE' ? !c.company_id : c.company_id === co)) &&
+    rows = cands.filter((c) => FX.match(c) && (!st || c.status === st) && (!fl || c.freelancer_id === fl) && (!co || (co === 'NONE' ? !c.company_id : c.company_id === co)) &&
       (!due || (due === 'any' ? earned[c.id] > 0 : due === 'none' ? !earned[c.id] : (c.paper_date && !c.start_date))) &&
       (!q || [c.name, c.code, c.mobile, '0' + c.mobile, flName(c.freelancer_id), S.flMap.get(c.freelancer_id)?.mobile].join(' ').toLowerCase().includes(q)));
+    FX.draw(rows);
     if (board) return drawBoard($('#board'), rows, render);
     const days = (c) => c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : null;
     const ALL = {
@@ -876,6 +855,7 @@ async function couriers() {
   $('[data-bclear]').onclick = () => { sel.clear(); render(); bulkBar(); };
   $('[data-bedit]').onclick = () => courierEdit(cands.filter((c) => sel.has(c.id)));
   $$('[data-q],[data-st],[data-co],[data-due],[data-fl]').forEach((el) => el.oninput = render);
+  const FX = AX.couriersFx({ S, compName, rules: rulesR.data || [], onChange: () => render() }); FX.fillOptions(cands);
   $('[data-csv]').onclick = () => csvDownload('FullSpeed_Couriers_Financial.csv',
     ['الكود', 'المندوب', 'موبايل المندوب', 'الشركة', 'الشريك', 'موبايل الشريك', 'الحالة', 'تاريخ الورق', 'أول يوم شغل', 'آخر يوم', 'البونص المستحق'],
     rows.map((c) => [c.code, c.name, '0' + c.mobile, compName(c.company_id, c.company_name), flName(c.freelancer_id), '0' + (S.flMap.get(c.freelancer_id)?.mobile || ''), CAND_STATUS[c.status]?.[0], c.paper_date, c.start_date, c.end_date, earned[c.id] || 0]));
@@ -1145,7 +1125,9 @@ async function withdrawals() {
   let rows = [];
   const render = () => {
     const st = $('[data-st]').value, q = $('[data-q]').value.trim().toLowerCase();
-    rows = wds.filter((w) => (!st || w.status === st) && (!q || [flName(w.freelancer_id), S.flMap.get(w.freelancer_id)?.mobile, w.details].join(' ').toLowerCase().includes(q)));
+    const base = wds.filter((w) => FX.match(w) && (!q || [flName(w.freelancer_id), S.flMap.get(w.freelancer_id)?.mobile, w.details].join(' ').toLowerCase().includes(q)));
+    rows = base.filter((w) => !st || w.status === st);
+    FX.draw(rows, base);
     pagedTable($('#tbl'), rows, [
       ['التاريخ', (w) => fmtDate(w.created_at)],
       ['الشريك', (w) => `<b>${esc(flName(w.freelancer_id))}</b><div class="small mono muted">0${esc(S.flMap.get(w.freelancer_id)?.mobile || '')}</div>`],
@@ -1169,6 +1151,7 @@ async function withdrawals() {
     } });
   };
   $$('[data-st],[data-q]').forEach((el) => el.oninput = render);
+  const FX = AX.withdrawalsFx({ S, flName, onChange: () => render() }); FX.fillOptions(wds);
   $('[data-csv]').onclick = () => {
     if (!rows.length) return toast('مفيش طلبات في الفلتر الحالي', 'bad');
     const st = $('[data-st]').value || 'all';
@@ -1188,7 +1171,7 @@ async function companies() {
     <div class="grid3">${S.companies.map((c) => {
       const rs = rFor(c.id); const paper = rs.find((r) => r.kind === 'paper');
       const tiers = rs.filter((r) => r.kind === 'days').sort((a, b) => a.min_days - b.min_days);
-      return `<div class="card stack" style="${c.active ? '' : 'opacity:.6'}">
+      return `<div class="card stack" data-co-card="${c.id}" data-active="${c.active ? 1 : 0}" style="${c.active ? '' : 'opacity:.6'}">
         <div class="row"><div class="logo co-logo">${c.logo_url ? logoImg(c.logo_url, (c.name || '?').slice(0, 2)) : '🏢'}</div>
           <div class="grow"><b>${esc(c.name)}</b>${c.active ? '' : ' <span class="chip r">موقوفة</span>'}<div class="small muted">البونص الكامل ${money(c.full_amount)} بعد ${c.target_days} يوم</div></div></div>
         <div class="small">ورق: <b>${money(paper?.amount ?? 0)}</b></div>
@@ -1197,6 +1180,13 @@ async function companies() {
       </div>`; }).join('') || '<div class="card empty">لا توجد شركات</div>'}</div>`);
   const add = $('[data-add]'); if (add) add.onclick = () => companyEdit(null, []);
   $$('[data-ed]').forEach((b) => b.onclick = () => companyEdit(S.companies.find((c) => c.id === b.dataset.ed), rFor(b.dataset.ed)));
+  const FX = await AX.companiesFx({ S, onChange: () => paint() });
+  const paint = () => {
+    const co = FX.get('co'), act = FX.get('act');
+    $$('[data-co-card]').forEach((el) => { el.hidden = (co && el.dataset.coCard !== co) || (act !== '' && el.dataset.active !== act); });
+    FX.draw();
+  };
+  paint();
 }
 
 function companyEdit(c, rules) {
@@ -1413,6 +1403,8 @@ async function jobs() {
     fetchAll(() => sb.from('candidates').select('job_id,status').not('job_id', 'is', null)),
   ]);
   const apps = {}; cands.forEach((c) => { if (c.status !== 'rejected') apps[c.job_id] = (apps[c.job_id] || 0) + 1; });
+  const hired = {}; cands.forEach((c) => { if (c.status === 'hired') hired[c.job_id] = (hired[c.job_id] || 0) + 1; });
+  js.forEach((j) => { j._fill = !apps[j.id] ? 'zero' : j.headcount && (hired[j.id] || 0) >= j.headcount ? 'full' : 'open'; });
   const live = js.filter((j) => j.status !== 'Deleted');
   view(`
     <div class="ph"><h1>الوظائف</h1>${can('jobs') ? '<button class="btn pri" data-add>➕ نشر وظيفة</button>' : ''}</div>
@@ -1430,8 +1422,9 @@ async function jobs() {
     <div id="tbl"></div>`);
   const render = () => {
     const st = $('[data-st]').value, co = $('[data-co]').value, q = $('[data-q]').value.trim().toLowerCase();
-    const rows = js.filter((j) => (st ? j.status === st : j.status !== 'Deleted') && (!co || j.company_id === co) &&
+    const rows = js.filter((j) => FX.match(j) && (st ? j.status === st : j.status !== 'Deleted') && (!co || j.company_id === co) &&
       (!q || [j.code, j.title, j.gov, j.region, j.pricing, j.bonus_text].join(' ').toLowerCase().includes(q)));
+    FX.draw(rows, { apps, hired });
     pagedTable($('#tbl'), rows, [
       ['الكود', (j) => `<span class="mono small">${esc(j.code)}</span><div class="small muted">${fmtDate(j.created_at)}</div>`],
       ['الوظيفة', (j) => `<b>${esc(j.title)}</b><div class="small muted">${esc(compName(j.company_id, j.company_name))}</div>`],
@@ -1462,6 +1455,7 @@ async function jobs() {
     } });
   };
   $$('[data-st],[data-co],[data-q]').forEach((el) => el.oninput = render);
+  const FX = AX.jobsFx({ S, compName, onChange: () => render() }); FX.fillOptions(js);
   const add = $('[data-add]'); if (add) add.onclick = () => jobEdit(null);
   render();
 }
