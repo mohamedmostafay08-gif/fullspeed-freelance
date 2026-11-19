@@ -316,7 +316,7 @@ const DICT = {
   'سجل دخول الإدارة': 'Admin sign-in log', 'الأجهزة الجديدة بس': 'New devices only', 'العضو': 'Member', 'حصل خطأ — جرّب تاني': 'Something went wrong — try again',
   'كل مرة حد من الفريق بيدخل بيتسجل هنا. لو حد دخل من جهاز جديد بيوصلك إشعار على الموبايل (لو مفعّل التقرير اليومي).': 'Every team sign-in is recorded here. A sign-in from a new device sends you a phone notification (if the daily report is on).',
   // ---- weekly report ----
-  'التقرير الأسبوعي': 'Weekly report', 'تقرير الأسبوع': 'Weekly report', 'مشاركة واتساب': 'Share on WhatsApp', 'ترشيحات جديدة': 'New nominations', 'كمّلوا أيام الهدف': 'Completed target days',
+  'الشركات': 'Companies', 'التقرير الأسبوعي': 'Weekly report', 'تقرير الأسبوع': 'Weekly report', 'مشاركة واتساب': 'Share on WhatsApp', 'ترشيحات جديدة': 'New nominations', 'كمّلوا أيام الهدف': 'Completed target days',
   'شركاء جداد': 'New partners', 'بونص مستحق': 'Bonus earned', 'اتصرف للشركاء': 'Paid to partners', 'سحوبات مستنية': 'Pending withdrawals', 'النشاط يوم بيوم': 'Day by day',
   'أنشط الشركاء': 'Most active partners', 'المحافظات': 'Governorates', 'ملاحظات': 'Notes', 'ترشيحات': 'Nominations', 'بدأوا': 'Started', 'بونص': 'Bonus',
   'اكتب ملاحظاتك على الأسبوع (بتظهر في الـ PDF)': 'Write your notes on the week (included in the PDF)', 'مفيش نشاط الأسبوع ده': 'No activity this week', 'مفيش ترشيحات الأسبوع ده': 'No nominations this week',
