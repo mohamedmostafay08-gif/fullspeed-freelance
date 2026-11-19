@@ -187,30 +187,57 @@ async function libs() {
   ]);
   return { html2canvas: window.html2canvas, jsPDF: window.jspdf.jsPDF };
 }
+// Inline an SVG's computed styles and turn it into an <img> of the same box — html2canvas draws images reliably.
+function svgToImg(svg, win) {
+  // Size from the parent's content box (the SVG's own box is unreliable in the cloned document).
+  const box = svg.parentElement, bcs = win.getComputedStyle(box);
+  const w = Math.floor(box.clientWidth - parseFloat(bcs.paddingLeft) - parseFloat(bcs.paddingRight));
+  const vb = svg.viewBox.baseVal, h = Math.round(Math.min(240, (w * vb.height) / vb.width));
+  const copy = svg.cloneNode(true);
+  const src = [svg, ...svg.querySelectorAll('*')], dst = [copy, ...copy.querySelectorAll('*')];
+  src.forEach((el, i) => {
+    const cs = win.getComputedStyle(el);
+    ['fill', 'stroke', 'stroke-width', 'font-size', 'font-weight', 'font-family', 'text-anchor'].forEach((k) => { const v = cs.getPropertyValue(k); if (v) dst[i].setAttribute(k, v); });
+  });
+  copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); copy.setAttribute('width', w); copy.setAttribute('height', h);
+  const img = svg.ownerDocument.createElement('img');
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(copy));
+  img.width = w; img.height = h; img.style.cssText = `display:block;inline-size:${w}px;block-size:${h}px`;
+  svg.replaceWith(img);
+  return new Promise((ok) => { if (img.complete) ok(); else { img.onload = ok; img.onerror = ok; } });
+}
 async function buildPdf() {
   const { html2canvas, jsPDF } = await libs();
-  const el = $('#rpt');
-  const root = document.documentElement, prevTheme = root.dataset.theme;
-  // Always export the light version (paper), whatever theme is on screen.
-  root.dataset.theme = 'light'; el.classList.add('rp-exporting');
-  const np = $('[data-notes-print]', el); np.textContent = $('[data-notes]', el).value.trim();
-  try {
-    await document.fonts?.ready;
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: 1100 });
-    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait', compress: true });
-    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight(), m = 22;
-    const iw = pw - m * 2, scale = iw / canvas.width, pageH = Math.floor((ph - m * 2) / scale);
-    // Slice the tall canvas into A4 pages.
-    for (let y = 0, i = 0; y < canvas.height; y += pageH, i++) {
-      const h = Math.min(pageH, canvas.height - y);
-      const part = document.createElement('canvas'); part.width = canvas.width; part.height = h;
-      part.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
-      if (i) pdf.addPage();
-      pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', m, m, iw, h * scale);
-    }
-    return pdf;
-  } finally {
-    el.classList.remove('rp-exporting');
-    if (prevTheme) root.dataset.theme = prevTheme; else delete root.dataset.theme;
+  const el = $('#rpt'), notes = $('[data-notes]', el).value.trim();
+  let breaks = [], cloneH = 1;
+  await document.fonts?.ready;
+  // All export-only changes happen in html2canvas's cloned document, so the page on screen never changes.
+  const canvas = await html2canvas(el, {
+    scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: 1100,
+    onclone: async (doc) => {
+      doc.documentElement.dataset.theme = 'light'; // paper is always light
+      const r = doc.getElementById('rpt'); r.classList.add('rp-exporting');
+      r.querySelector('[data-notes-print]').textContent = notes;
+      await Promise.all([...r.querySelectorAll('svg.rp-svg')].map((s) => svgToImg(s, doc.defaultView)));
+      // Page breaks may fall between blocks (header, KPI rows, cards), never through one.
+      const top = r.getBoundingClientRect().top; cloneH = r.getBoundingClientRect().height;
+      breaks = [...r.querySelectorAll('.rp-head, .rp-kpi, .rp > .card, .rp-grid > *, .rp-foot')].map((b) => b.getBoundingClientRect().bottom - top + 7);
+    },
+  });
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait', compress: true });
+  const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight(), m = 22;
+  const iw = pw - m * 2, scale = iw / canvas.width, pageH = Math.floor((ph - m * 2) / scale);
+  const k = canvas.height / cloneH, cuts = breaks.map((b) => Math.round(b * k)).sort((a, b) => a - b);
+  for (let y = 0, i = 0; y < canvas.height - 4; i++) {
+    let end = Math.min(canvas.height, y + pageH);
+    if (end < canvas.height) { const c = cuts.filter((b) => b > y + pageH * 0.4 && b <= end).pop(); if (c) end = c; }
+    const h = end - y;
+    const part = document.createElement('canvas'); part.width = canvas.width; part.height = h;
+    const g = part.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, part.width, h);
+    g.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+    if (i) pdf.addPage();
+    pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', m, m, iw, h * scale);
+    y = end;
   }
+  return pdf;
 }

@@ -25,7 +25,7 @@
 .rp-t td,.rp-t th{padding:7px 8px}
 .rp-legend{display:flex;gap:14px;font-size:12px;color:var(--ink2);margin-bottom:4px}
 .rp-legend i{display:inline-block;inline-size:10px;block-size:10px;border-radius:3px;margin-inline-end:5px;vertical-align:-1px}
-.rp-svg{inline-size:100%;block-size:auto;display:block}
+.rp-svg{inline-size:100%;block-size:auto;max-block-size:240px;display:block}
 .rp-b1{fill:var(--g);background:var(--g)}
 .rp-b2{fill:var(--orange);background:var(--orange)}
 .rp-ax{stroke:var(--line-strong);stroke-width:1}
@@ -37,6 +37,8 @@
 .rp-foot{font-size:11.5px;color:var(--mute);text-align:center;padding:4px 0 8px}
 /* PDF export: solid paper look, notes as text, no blur (html2canvas can't draw backdrop-filter) */
 .rp-exporting{background:#fff;padding:18px;border-radius:0}
+/* html2canvas splits letter-spaced text into single glyphs, which breaks Arabic joining */
+.rp-exporting,.rp-exporting *{letter-spacing:0!important;text-transform:none!important}
 .rp-exporting .card,.rp-exporting .rp-kpi{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:#fff!important;box-shadow:none!important;border:1px solid #e3ebe7!important}
 .rp-exporting .rp-notes textarea{display:none}
 .rp-exporting .rp-notes-print{display:block}
