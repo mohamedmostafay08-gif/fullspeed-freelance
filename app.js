@@ -103,9 +103,15 @@ const DEFAULT_LEVELS = [
 const hue = (s) => { let h = 7; for (const ch of String(s || '')) h = (h * 31 + ch.codePointAt(0)) % 360; return h; };
 const initials = (name) => String(name || '').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('') || '؟';
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'صباح الخير ☀️' : h < 18 ? 'يومك سعيد 🌤️' : 'مساء الخير 🌙'; };
+// Levels come from staff-editable settings and are rendered as HTML, so keep only plain text and a hex colour.
+const plain = (v, max) => String(v ?? '').replace(/[<>&"'`]/g, '').slice(0, max);
 const LEVELS_OF = () => {
   const l = S.settings?.levels;
-  return Array.isArray(l) && l.length && l[0].min === 0 ? [...l].sort((a, b) => a.min - b.min) : DEFAULT_LEVELS;
+  if (!(Array.isArray(l) && l.length && Number(l[0]?.min) === 0)) return DEFAULT_LEVELS;
+  return l.map((x) => ({
+    n: plain(x?.n, 24) || '—', i: plain(x?.i, 8), min: Math.max(0, Math.floor(Number(x?.min) || 0)),
+    c: /^#[0-9a-f]{3,8}$/i.test(String(x?.c ?? '')) ? x.c : '#8a86a8',
+  })).sort((a, b) => a.min - b.min);
 };
 const feat = (k) => S.settings?.features?.[k] !== false;
 // Staff opening /?as=<partner id> from the admin panel get a read-only copy of that partner's app.
@@ -1163,20 +1169,34 @@ function matchJobs(gov, region, vehicle) {
 
 // ------------------------------------------------------------------ offline nomination queue
 const queueKey = () => ukey('queue');
+// Give ids to old queued items without dropping anything added since the queue was read.
+const mergeQueue = (withIds) => {
+  const cur = store.get(queueKey(), []);
+  return cur.map((it) => it.id ? it : (withIds.find((w) => w.at === it.at && w.p?.mobile === it.p?.mobile) || it));
+};
 const isNetErr = (e) => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(String(e?.message || e));
+// Only one flush may run at a time (boot and the 'online' event can fire together), and each queued
+// nomination carries an id so finishing a flush removes exactly what was sent — never ones added meanwhile.
+let flushing = false;
 async function flushQueue() {
-  const q = store.get(queueKey(), []);
-  if (!q.length || !navigator.onLine) return;
-  let ok = 0; const left = [], failed = [];
-  for (const item of q) {
-    try {
-      const { error } = await sb.rpc('submit_candidate', { p: item.p });
-      if (!error) ok++;
-      else if (isNetErr(error)) left.push(item);
-      else failed.push(`${item.p.name}: ${errMsg(error)}`);
-    } catch (e) { if (isNetErr(e)) left.push(item); else failed.push(`${item.p.name}: ${errMsg(e)}`); }
+  if (flushing || !navigator.onLine) return;
+  const q = store.get(queueKey(), []).map((it) => (it.id ? it : { ...it, id: `${it.at || 0}-${Math.random().toString(36).slice(2)}` }));
+  if (!q.length) return;
+  flushing = true;
+  store.set(queueKey(), mergeQueue(q));
+  let ok = 0; const done = new Set(), failed = [];
+  try {
+    for (const item of q) {
+      try {
+        const { error } = await sb.rpc('submit_candidate', { p: item.p });
+        if (!error) { ok++; done.add(item.id); }
+        else if (!isNetErr(error)) { done.add(item.id); failed.push(`${item.p.name}: ${errMsg(error)}`); }
+      } catch (e) { if (!isNetErr(e)) { done.add(item.id); failed.push(`${item.p.name}: ${errMsg(e)}`); } }
+    }
+  } finally {
+    store.set(queueKey(), store.get(queueKey(), []).filter((it) => !done.has(it.id)));
+    flushing = false;
   }
-  store.set(queueKey(), left);
   if (ok) { toast(`اتبعت ${ok} ترشيح كانوا مستنيين النت ✅`, 'ok'); S.cands = null; if (S.view === 'couriers' || S.view === 'home') go(S.view); }
   if (failed.length) toast('ترشيحات مااتبعتش: ' + failed.join(' · '), 'bad');
 }
@@ -1250,7 +1270,7 @@ function addCourier(job, pre = {}) {
     const payload = { name: f.name.value, mobile: f.mobile.value, gov: f.gov.value, region: f.region.value, vehicle: f.vehicle.value,
       job_id: job?.id ?? null, company_id: job ? null : f.company.value };
     const queueIt = () => {
-      store.set(queueKey(), [...store.get(queueKey(), []), { p: payload, at: Date.now() }]);
+      store.set(queueKey(), [...store.get(queueKey(), []), { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, p: payload, at: Date.now() }]);
       m.close(); buzz(20); track('nominate:offline');
       toast('مفيش نت دلوقتي 📶 الترشيح اتحفظ وهيتبعت لوحده أول ما النت يرجع', 'ok');
     };

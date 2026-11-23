@@ -778,7 +778,7 @@ function partnerEdit(f) {
       const patch = {
         name: fm.name.value.trim(), email: fm.email.value.trim() || null,
         gov: fm.gov.value.trim(), region: fm.region.value.trim(), notes: fm.notes.value.trim() || null,
-        ref_code: fm.ref_code.value.trim().toUpperCase() || null,
+        ref_code: fm.ref_code.value.trim().toLowerCase() || null, // referral lookups compare in lower case
       };
       if (status) patch.status = status;
       const { error } = await sb.from('freelancers').update(patch).eq('id', f.id);

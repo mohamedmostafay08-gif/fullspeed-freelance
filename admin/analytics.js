@@ -65,7 +65,7 @@ export function hbars(items, { k = '', fmt = n0, active = '', empty = 'مفيش 
     return `<div class="ax-hb ${k ? 'is-click' : ''} ${on ? 'on' : ''} ${active && !on ? 'dim' : ''}" ${click(k, x.v, on)} ${tip(`<b>${esc(x.label)}</b><br>${fmt(x.value)}${x.tipx ? '<br>' + x.tipx : ''}`)}>
       <span class="ax-hl">${esc(x.label)}</span>
       <span class="ax-ht"><i class="${x.tone || tone}" style="inline-size:${Math.max(1.5, (x.value / max) * 100)}%${x.heat != null ? `;--heat:${x.heat}` : ''}"></i></span>
-      <span class="ax-hv">${fmt(x.value)}${x.sub ? `<small>${x.sub}</small>` : ''}</span></div>`;
+      <span class="ax-hv">${fmt(x.value)}${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span></div>`;
   }).join('')}</div>`;
 }
 // Vertical (grouped) columns over months. groups: [{key, label, vals:[...], forecast}] series: [{name, cls}]
@@ -225,7 +225,7 @@ export async function dashboard(host, { S, compName, flName }) {
     const liveJobs = jobs.filter((j) => j.status !== 'Deleted' && jobOk(j));
     const nom = countBy(rows.filter((c) => c.job_id), (c) => c.job_id);
     const hiredAll = countBy(cands.filter((c) => c.job_id && c.status === 'hired'), (c) => c.job_id);
-    const demand = liveJobs.map((j) => ({ label: `${j.title || '—'} • ${compName(j.company_id, j.company_name)}`, v: j.id, value: nom.get(j.id) || 0, sub: j.region || j.gov || '', tipx: `${j.code} • ${j.gov || ''} ${j.region || ''}` })).filter((x) => x.value).sort((a, b) => b.value - a.value);
+    const demand = liveJobs.map((j) => ({ label: `${j.title || '—'} • ${compName(j.company_id, j.company_name)}`, v: j.id, value: nom.get(j.id) || 0, sub: j.region || j.gov || '', tipx: esc(`${j.code} • ${j.gov || ''} ${j.region || ''}`) })).filter((x) => x.value).sort((a, b) => b.value - a.value);
     const fill = liveJobs.filter((j) => j.headcount).map((j) => { const h = hiredAll.get(j.id) || 0; return { label: `${j.title || '—'} • ${compName(j.company_id, j.company_name)}`, v: j.id, value: Math.min(100, pct(h, j.headcount)), sub: `${h}/${j.headcount}`, tone: h >= j.headcount ? 'tn-g' : 'tn-b', tipx: `اتعيّن ${h} من ${j.headcount} مطلوب` }; }).sort((a, b) => b.value - a.value);
     const zero = liveJobs.filter((j) => j.status === 'Active' && (!j.expiry || j.expiry >= today()) && !cands.some((c) => c.job_id === j.id));
     const jobsCard = card('💼 الوظايف والشركات', `<div class="ax-split">

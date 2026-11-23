@@ -139,15 +139,20 @@ function contestCard(k, edit) {
 function campaignForm(k) {
   const { S } = C;
   const [, m2] = monthBounds();
-  const fls = S.fl.filter((f) => !f.duplicate_of && f.status === 'Active').sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  // The campaign's current partner/governorate must always be in its list, or the browser silently picks the
+  // first option and saving moves the campaign (and its bonus) to someone else.
+  const fls = S.fl.filter((f) => !f.duplicate_of && (f.status === 'Active' || (k?.scope === 'partner' && f.id === k.scope_value)))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  const govs = k?.scope === 'gov' && k.scope_value && !GOVS.includes(k.scope_value) ? [k.scope_value, ...GOVS] : GOVS;
+  const flSt = (f) => (f.status === 'Active' ? '' : ` (${f.status === 'Inactive' ? 'موقوف' : f.status === 'Hold' ? 'معلّق' : 'قيد المراجعة'})`);
   const m = modal(`<h2>${k ? 'تعديل حملة' : '🎯 حملة بونص جديدة'}</h2>
     <form class="stack">
       <div class="grid2"><div><label class="f">اسم الحملة (بيظهر للشريك)</label><input class="in" name="name" required maxlength="80" value="${esc(k?.name || '')}" placeholder="مثال: حملة نون القاهرة"></div>
         <div><label class="f">المبلغ الزيادة لكل مندوب (ج.م)</label><input class="in" name="amount" type="number" min="1" max="100000" required value="${k?.amount ?? ''}" placeholder="200"></div></div>
       <div class="grid2"><div><label class="f">لمين؟</label><select class="in" name="scope">${Object.entries(SCOPE_AR).map(([v, t]) => `<option value="${v}" ${k?.scope === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div data-sv><label class="f">اختار</label>
-          <select class="in" name="sv_partner">${fls.map((f) => `<option value="${f.id}" ${k?.scope_value === f.id ? 'selected' : ''}>${esc(f.name)} — 0${esc(f.mobile)}</option>`).join('')}</select>
-          <select class="in" name="sv_gov">${GOVS.map((g) => `<option ${k?.scope_value === g ? 'selected' : ''}>${g}</option>`).join('')}</select>
+          <select class="in" name="sv_partner">${k?.scope !== 'partner' ? '<option value="">اختار الشريك…</option>' : ''}${fls.map((f) => `<option value="${f.id}" ${k?.scope_value === f.id ? 'selected' : ''}>${esc(f.name)}${flSt(f)} — 0${esc(f.mobile)}</option>`).join('')}</select>
+          <select class="in" name="sv_gov">${govs.map((g) => `<option ${k?.scope_value === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
           <select class="in" name="sv_company">${S.companies.map((c) => `<option value="${c.id}" ${k?.scope_value === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div></div>
       <div class="grid2"><div><label class="f">المناديب اللي اترشّحوا من</label><input class="in" type="date" name="starts" required value="${k?.starts_on || today()}"></div>
         <div><label class="f">لحد</label><input class="in" type="date" name="ends" required value="${k?.ends_on || m2}"></div></div>
@@ -174,6 +179,12 @@ function campaignForm(k) {
       starts_on: f.starts.value, ends_on: f.ends.value, trigger_kind: f.trig.value, min_days: Number(f.days.value) || 26, note: f.note.value.trim() || null,
     };
     if (rec.ends_on < rec.starts_on) return ($('[data-err]', f).textContent = 'تاريخ النهاية قبل البداية');
+    if (sc !== 'all' && !rec.scope_value) return ($('[data-err]', f).textContent = 'اختار الحملة لمين');
+    // Changing who an existing campaign pays is a deliberate act: ask before saving it.
+    if (k && (sc !== k.scope || (rec.scope_value ?? null) !== (k.scope_value ?? null)) && !f.dataset.scopeOk) {
+      f.dataset.scopeOk = '1';
+      return ($('[data-err]', f).textContent = `انتبه: الحملة هتتنقل من "${scopeLabel(k)}" لـ "${scopeLabel(rec)}". دوس حفظ تاني للتأكيد.`);
+    }
     busy($('button.pri', f), async () => {
       const q = k ? sb.from('bonus_campaigns').update(rec).eq('id', k.id).select('id').single() : sb.from('bonus_campaigns').insert(rec).select('id').single();
       const { data, error } = await q;
