@@ -2,7 +2,7 @@
 // companies and governorates, plus free-text notes. "PDF" renders the report to a real A4 PDF in the
 // browser (html2canvas-pro → jsPDF, so Arabic is shaped by the browser), "مشاركة" sends the file through the
 // phone's share sheet when it can, or a WhatsApp text summary with a link back to the report.
-import { $, $$, esc, money, fetchAll, sb, toast, busy } from '../shared/common.js';
+import { $, $$, esc, money, fetchAll, sb, toast, busy, targetDaysMap } from '../shared/common.js';
 import { hbars, card } from './analytics.js';
 
 const TZ = 'Africa/Cairo';
@@ -84,8 +84,7 @@ async function loadData(S) {
     sb.from('bonus_rules').select('company_id,kind,min_days').eq('active', true),
   ]);
   const tgt = {};
-  S.companies.forEach((c) => { tgt[c.id] = Number(c.target_days) || 26; });
-  (rules.data || []).filter((r) => r.kind === 'days').forEach((r) => { tgt[r.company_id] = Math.max(tgt[r.company_id] === 26 ? 0 : tgt[r.company_id] || 0, r.min_days) || 26; });
+  Object.assign(tgt, targetDaysMap(rules.data || [], S.companies));
   cache.d = { cands, led, wds, fl: S.fl, tgt }; cache.t = Date.now();
   return cache.d;
 }

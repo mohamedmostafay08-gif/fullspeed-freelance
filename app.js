@@ -1,7 +1,7 @@
 // Full Speed Network — Freelancer app
 import {
   sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, logoSrc, toast, modal, errMsg, busy,
-  GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip,
+  GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip, fetchAll,
 } from './shared/common.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './shared/config.js';
 import { loadGrowth, growthCards, bindGrowth, growthKind } from './shared/partner-growth.js';
@@ -321,6 +321,7 @@ async function pkCall(action, extra = {}, auth = false) {
 }
 const deviceName = () => { const u = navigator.userAgent; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? (u.match(/Android[^;]*;\s*([^;)]+)/)?.[1] || 'Android').trim() : /Mac/.test(u) ? 'Mac' : /Windows/.test(u) ? 'Windows' : 'جهاز'; };
 async function registerPasskey() {
+  if (RO) throw new Error('read_only');
   const { startRegistration } = await swa();
   const { options, cid } = await pkCall('register-options', { label: '0' + (S.summary?.freelancer?.mobile || '') }, true);
   const response = await startRegistration({ optionsJSON: options });
@@ -364,6 +365,7 @@ const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in win
 const b64ToU8 = (b) => { const p = '='.repeat((4 - (b.length % 4)) % 4), r = atob((b + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
 async function currentPushSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
 async function enablePush() {
+  if (RO) throw new Error('read_only');
   if (isIOS && !standalone()) throw new Error('ios_install');
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') throw new Error('denied');
@@ -376,6 +378,7 @@ async function enablePush() {
   track('push:on');
 }
 async function disablePush() {
+  if (RO) return;
   const sub = await currentPushSub(); if (!sub) return;
   await sb.rpc('remove_push_subscription', { p_endpoint: sub.endpoint });
   await sub.unsubscribe().catch(() => {});
@@ -398,7 +401,8 @@ function bindPushCard() {
   };
 }
 
-const logout = async () => { await sb.auth.signOut(); location.reload(); };
+// Stop this phone's notifications before signing out, so a shared or handed-over phone stops getting them.
+const logout = async () => { if (!RO) await disablePush().catch(() => {}); await sb.auth.signOut(); location.reload(); };
 $$('[data-logout]').forEach((b) => b.onclick = logout);
 $('#waitRefresh').onclick = () => boot();
 
@@ -422,7 +426,7 @@ function renderBanners() {
     out.push(`<div class="banner ${esc(a.tone || 'info')}">📣 ${esc(a.text)}${a.link ? ` <button class="link" data-banner-go="${esc(a.link)}">شوف</button>` : ''} <button class="x" data-annc-x aria-label="إخفاء">×</button></div>`);
   }
   host.innerHTML = out.join('');
-  $$('[data-banner-go]', host).forEach((b) => b.onclick = () => go(b.dataset.bannerGo));
+  $$('[data-banner-go]', host).forEach((b) => b.onclick = () => openLink(b.dataset.bannerGo));
   const ax = $('[data-annc-x]', host); if (ax) ax.onclick = () => { store.set('fsf-annc-x', a.text); renderBanners(); };
   const rx = $('[data-ro-x]', host); if (rx) rx.onclick = () => window.close();
 }
@@ -464,7 +468,7 @@ async function boot() {
   if (store.get('fsf-open-day', '') !== today()) { store.set('fsf-open-day', today()); track('app:open'); }
   if (!RO) setTimeout(flushQueue, 1500);
   const want = new URLSearchParams(location.search).get('go');
-  if (['home', 'jobs', 'couriers', 'wallet', 'me', 'chat'].includes(want)) { S.view = want; history.replaceState(null, '', location.pathname); }
+  if (VIEWS.includes(want)) { S.view = want; history.replaceState(null, '', location.pathname); }
   go(S.view);
   if (RO) return;
   maybeTour();
@@ -479,6 +483,13 @@ function updateLevelChip() {
 }
 
 // ------------------------------------------------------------------ nav
+const VIEWS = ['home', 'jobs', 'couriers', 'wallet', 'me', 'chat'];
+// Announcement / notification links: an https URL opens in a new tab, an app screen navigates, anything else is ignored.
+function openLink(l) {
+  const v = String(l || '').trim();
+  if (VIEWS.includes(v)) return go(v);
+  if (/^https:\/\//i.test(v)) window.open(v, '_blank', 'noopener');
+}
 $$('.dock [data-go]').forEach((b) => b.onclick = () => { buzz(5); go(b.dataset.go); });
 $('#fab').onclick = () => addCourier();
 $('#meBtn').onclick = () => go('me');
@@ -486,7 +497,12 @@ $('#lvChip').onclick = () => go('me');
 $('#bellBtn').onclick = () => { buzz(5); notificationsSheet(); };
 $('#chatBtn').onclick = () => { buzz(5); go('chat'); };
 let chatTimer = null;
+// Each navigation gets a number; a screen whose data arrives after the user moved on drops it (see stale()).
+let NAV = 0;
+const stale = (n) => n !== NAV;
 function go(v) {
+  if (!VIEWS.includes(v)) v = 'home';
+  NAV++;
   S.view = v;
   clearInterval(chatTimer);
   $$('.dock [data-go]').forEach((b) => b.classList.toggle('on', b.dataset.go === v));
@@ -511,12 +527,13 @@ async function notificationsSheet() {
       <span class="n-ic">${NOTIF_IC[n.kind] || '🔔'}</span>
       <span class="grow"><b>${esc(n.title)}</b>${n.body ? `<span>${esc(n.body)}</span>` : ''}<em>${ago(n.created_at)}</em></span></button>`).join('')
     : empty('🔕', 'مفيش إشعارات لسه', 'أول ما مندوب يتعيّن أو بونص ينزل هتلاقيه هنا.');
-  $$('[data-link]', box).forEach((b) => b.onclick = () => { const l = b.dataset.link; m.close(); if (l) go(l); });
+  $$('[data-link]', box).forEach((b) => b.onclick = () => { const l = b.dataset.link; m.close(); if (l) openLink(l); });
   if (!RO && data.some((n) => !n.read_at)) { await sb.rpc('mark_notifications_read'); if (S.summary.unread) S.summary.unread.notifications = 0; updateLevelChip(); }
 }
 
 // ------------------------------------------------------------------ chat with admin
 async function chat() {
+  const nav = NAV;
   view(`<div class="page-h"><div><h2>كلّم الإدارة</h2><p>اسأل عن مندوب، طلب سحب أو أي حاجة — بنرد في أقرب وقت</p></div></div>
     <div class="chat" id="chatBox"><div class="spin"></div></div>
     <form class="composer" id="chatForm"><textarea class="in" name="body" rows="1" maxlength="2000" placeholder="اكتب رسالتك..." required></textarea>
@@ -525,9 +542,11 @@ async function chat() {
   let lastId = 0;
   const bubble = (x) => `<div class="bub ${x.from_staff ? 'them' : 'me'}"><p>${esc(x.body)}</p><em>${ago(x.created_at)}${!x.from_staff && x.read_at ? ' · ✓✓' : ''}</em></div>`;
   const load = async () => {
-    const { data, error } = await sb.from('messages').select('id,from_staff,body,created_at,read_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at').limit(300);
-    if (S.view !== 'chat') return;
+    // Newest 300, shown oldest-first.
+    const { data: rows, error } = await sb.from('messages').select('id,from_staff,body,created_at,read_at').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }).limit(300);
+    if (stale(nav) || !box.isConnected) return;
     if (error) { box.innerHTML = empty('⚠️', 'مقدرناش نحمّل المحادثة', errMsg(error)); return; }
+    const data = (rows || []).slice().reverse();
     const newest = data.length ? data[data.length - 1].id : 0;
     if (newest === lastId && box.dataset.ok) return;
     lastId = newest; box.dataset.ok = '1';
@@ -536,8 +555,10 @@ async function chat() {
     if (!RO && data.some((x) => x.from_staff && !x.read_at)) { await sb.rpc('mark_messages_read'); if (S.summary.unread) S.summary.unread.messages = 0; updateLevelChip(); }
   };
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; };
+  if (RO) f.hidden = true;
   f.onsubmit = async (e) => {
     e.preventDefault();
+    if (RO) return;
     const body = ta.value.trim(); if (!body) return;
     await busy($('button', f), async () => {
       const { error } = await sb.rpc('send_message', { p_body: body });
@@ -637,7 +658,9 @@ async function docsSheet(c) {
       return `<a class="doc" href="${esc(u)}" target="_blank" rel="noopener">${pdf ? '<span class="doc-pdf">PDF</span>' : `<img src="${esc(u)}" alt="" loading="lazy">`}<em>${fmtDate(f.created_at)}</em></a>`;
     }).join('');
   };
+  if (RO) $('.up-btn', m.el).hidden = true;
   inp.onchange = async () => {
+    if (RO) return;
     const files = [...inp.files]; if (!files.length) return;
     const lbl = $('.up-btn', m.el); lbl.classList.add('busy'); lbl.lastChild.textContent = `بنرفع ${files.length} ملف...`;
     let ok = 0;
@@ -675,12 +698,13 @@ async function loadJobs() {
 }
 async function loadCands(force) {
   if (S.cands && !force) return;
-  const [a, b] = await Promise.all([
-    sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at,source').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
-    sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,note').eq('freelancer_id', S.summary.freelancer.id).order('created_at', { ascending: false }),
+  // Paged with a stable order so partners with many couriers aren't cut off at 1000 rows.
+  const fid = S.summary.freelancer.id;
+  const [cands, ledger] = await Promise.all([
+    fetchAll(() => sb.from('candidates').select('id,code,name,mobile,company_id,company_name,job_id,vehicle,gov,region,status,paper_date,start_date,end_date,created_at,source').eq('freelancer_id', fid).order('created_at', { ascending: false })),
+    fetchAll(() => sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,note').eq('freelancer_id', fid).order('created_at', { ascending: false })).catch(() => []),
   ]);
-  if (a.error) throw a.error;
-  S.cands = a.data; S.ledger = b.data ?? [];
+  S.cands = cands; S.ledger = ledger;
 }
 const compName = (c) => S.companies.find((x) => x.id === c.company_id)?.name || c.company_name || '—';
 const targetDays = (companyId) => {
@@ -713,8 +737,10 @@ function bindPills(root, st, render) {
 
 // ------------------------------------------------------------------ home
 async function home() {
+  const nav = NAV;
   if (!S.summary) loading();
   const [, , , G] = await Promise.all([refreshSummary(), loadJobs(), loadCands().catch(() => {}), loadGrowth()]);
+  if (stale(nav)) return;
   updateJobsBadge();
   const s = S.summary, b = s.balance || {}, n = s.counts || {};
   const fc = forecast();
@@ -842,8 +868,10 @@ function miniJob(j, i) {
 
 // ------------------------------------------------------------------ jobs
 async function jobs() {
+  const nav = NAV;
   if (!S.jobs) loading();
   const err = await loadJobs();
+  if (stale(nav)) return;
   if (err) return view(empty('⚠️', 'مقدرناش نحمّل الوظائف', errMsg(err)));
   const govs = [...new Set(S.jobs.map((j) => j.gov).filter(Boolean))];
   const st = { q: '', gov: '', veh: '', only: '', co: S.jobCo || '' };
@@ -897,7 +925,7 @@ async function jobs() {
         locate().then((pos) => { JOBCTX.me = pos; buzz(10); }).catch(() => {
           toast('مقدرناش نعرف مكانك — اسمح للتطبيق يوصل للموقع من إعدادات المتصفح', 'bad');
           st.only = ''; $$('[data-f=only] .pill').forEach((x) => x.classList.toggle('on', !x.dataset.v));
-        }).finally(() => { JOBCTX.locating = false; render(); });
+        }).finally(() => { JOBCTX.locating = false; if ($('#jobList')) render(); }); // the user may have left the Jobs tab
       }
       $('#jobList').innerHTML = '<div class="empty-s"><span class="e-ic">📍</span><b>بنحدد مكانك...</b><p>عشان نرتّبلك أقرب الوظايف ليك</p></div>';
       return;
@@ -960,12 +988,15 @@ const loadLeaflet = () => leafletP || (leafletP = new Promise((res, rej) => {
   const sc = document.createElement('script'); sc.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
   sc.onload = () => res(window.L); sc.onerror = () => { leafletP = null; rej(new Error('leaflet')); }; document.head.appendChild(sc);
 }));
+// Only one Leaflet map lives at a time; the previous one is torn down so its listeners and tiles don't pile up.
+let jobMap = null;
 async function drawMap(list) {
   const el = $('#jmap'); if (!el) return;
   let L; try { L = await loadLeaflet(); } catch { el.innerHTML = '<p class="muted" style="padding:20px;text-align:center">مقدرناش نحمّل الخريطة، جرّب تاني.</p>'; return; }
   if (!document.body.contains(el)) return;
+  if (jobMap) { try { jobMap.remove(); } catch { /* already detached */ } jobMap = null; }
   el.innerHTML = '';
-  const map = L.map(el, { zoomControl: true }).setView([30.05, 31.25], 10);
+  const map = jobMap = L.map(el, { zoomControl: true }).setView([30.05, 31.25], 10);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
   const pts = [];
   const placed = list.filter((j) => j.lat != null && j.lng != null);
@@ -1290,8 +1321,10 @@ function addCourier(job, pre = {}) {
 
 // ------------------------------------------------------------------ couriers
 async function couriers() {
+  const nav = NAV;
   loading();
-  try { await loadCands(); } catch (e) { return view(empty('⚠️', 'مقدرناش نحمّل المناديب', errMsg(e))); }
+  try { await loadCands(); } catch (e) { return stale(nav) ? null : view(empty('⚠️', 'مقدرناش نحمّل المناديب', errMsg(e))); }
+  if (stale(nav)) return;
   const earnedBy = {};
   S.ledger.filter((l) => !l.reversed_at && l.candidate_id).forEach((l) => { earnedBy[l.candidate_id] = (earnedBy[l.candidate_id] || 0) + Number(l.amount); });
   const totalEarned = Object.values(earnedBy).reduce((a, x) => a + x, 0);
@@ -1378,6 +1411,7 @@ async function receiptSheet(x) {
 }
 
 async function wallet() {
+  const nav = NAV;
   loading();
   await refreshSummary();
   const [w, l] = await Promise.all([
@@ -1385,6 +1419,7 @@ async function wallet() {
     sb.from('bonus_ledger').select('id,candidate_id,kind,tier_days,amount,earned_on,reversed_at,reverse_reason,note').eq('freelancer_id', S.summary.freelancer.id).order('earned_on', { ascending: false }),
   ]);
   if (!S.cands) await loadCands().catch(() => {});
+  if (stale(nav)) return;
   const cName = (id) => S.cands?.find((c) => c.id === id)?.name || '';
   const wds = w.data || [], led = l.data || [];
   const b = S.summary.balance || {}, bal = Number(b.balance) || 0;
@@ -1562,7 +1597,9 @@ async function refreshSecurity() {
   };
 }
 async function me() {
+  const nav = NAV;
   if (!S.cands) { loading(); await loadCands().catch(() => {}); }
+  if (stale(nav)) return;
   const f = S.summary.freelancer, n = S.summary.counts || {}, lv = level(n.hired || 0);
   const bdg = badgesOf(), got = bdg.filter((x) => x[2].ok).length;
   view(`
@@ -1585,7 +1622,7 @@ async function me() {
       <div class="bd-h"><h3>🏅 إنجازاتك</h3><span>${got} من ${bdg.length}</span></div>
       <div class="badges">${bdg.map(([ic, t, s]) => `<div class="bdg ${s.ok ? 'ok' : ''}" title="${esc(t)}"><span class="bd-ic">${ic}</span><b>${esc(t)}</b>${s.ok ? '<em>✓</em>' : `<em>${s.prog}</em>`}</div>`).join('')}</div>
     </section>
-    <section class="card stack rise" style="--i:2;margin-top:14px">
+    ${RO ? '' : `<section class="card stack rise" style="--i:2;margin-top:14px">
       <h3>${IC.user} بياناتي</h3>
       <form class="stack" id="pf">
         <div><label class="f">الإيميل</label><input class="in mono" name="email" type="email" value="${esc(f.email || '')}"></div>
@@ -1610,7 +1647,7 @@ async function me() {
       <div class="set-row" ${feat('passkey') ? '' : 'hidden'}><div class="grow"><b>الدخول بالبصمة أو الوش</b><span id="pkState">بنشوف...</span></div><button class="btn sec sm" id="pkBtn" hidden>فعّل</button></div>
       <div class="pk-list" id="pkList"></div>
       <div class="set-row"><div class="grow"><b>إشعارات الموبايل</b><span id="pushState">بنشوف...</span></div><button class="btn sec sm" id="pushBtn" hidden>فعّل</button></div>
-    </section>
+    </section>`}
     <section class="card rise" style="--i:3;margin-top:14px">
       <h3>🌓 المظهر</h3>
       <div class="theme-seg">${[['', '📱 تلقائي'], ['light', '☀️ فاتح'], ['dark', '🌙 غامق']].map(([v, t]) => `<button class="pill ${(store.get('fsf-theme', '') || '') === v ? 'on' : ''}" data-theme-set="${v}">${t}</button>`).join('')}</div>
@@ -1627,16 +1664,19 @@ async function me() {
     store.set('fsf-theme', v); applyTheme(v); buzz(5);
     $$('[data-theme-set]').forEach((x) => x.classList.toggle('on', x === b));
   });
-  $('#pf').onsubmit = async (e) => {
+  const pf = $('#pf'), pw = $('#pw');
+  if (pf) pf.onsubmit = async (e) => {
     e.preventDefault(); const t = e.target;
+    if (RO) return;
     await busy($('button', t), async () => {
       const { error } = await sb.rpc('update_my_profile', { p_gov: t.gov.value, p_region: t.region.value, p_email: t.email.value });
       if (error) return ($('[data-err]', t).textContent = errMsg(error));
       $('[data-err]', t).textContent = ''; toast('تم الحفظ ✅', 'ok'); await refreshSummary();
     });
   };
-  $('#pw').onsubmit = async (e) => {
+  if (pw) pw.onsubmit = async (e) => {
     e.preventDefault(); const t = e.target;
+    if (RO) return;
     if (t.a.value !== t.b.value) return ($('[data-err]', t).textContent = 'كلمتين المرور مش متطابقين.');
     await busy($('button', t), async () => {
       const { error } = await sb.auth.updateUser({ password: t.a.value });

@@ -1,13 +1,13 @@
 // Admin analytics: small HTML/CSS chart primitives (RTL-friendly, theme-aware, hover tooltips)
 // and the chart strip for each page. Clickable marks carry data-fx-k / data-fx-v, which the page's
 // filter bar (filters.js) turns into a filter; '@month' columns narrow the date range to that month.
-import { $, $$, esc, money, fetchAll, sb, CAND_STATUS, WD_STATUS, FL_STATUS, today, daysBetween } from '../shared/common.js';
+import { $, $$, esc, money, fetchAll, sb, CAND_STATUS, WD_STATUS, FL_STATUS, today, daysBetween, dayOfValue, targetDaysMap } from '../shared/common.js';
 import { filters, rangeBounds, inBounds } from './filters.js';
 import { qBand, Q_BANDS } from './growth.js';
 
 const n0 = (v) => Math.round(Number(v) || 0).toLocaleString('en-US');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-const ym = (v) => (v ? String(v.length > 10 ? new Date(v).toISOString() : v).slice(0, 7) : '');
+const ym = (v) => dayOfValue(v).slice(0, 7); // Cairo month of a date or timestamp
 const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 const monthLabel = (k) => { const [y, m] = k.split('-').map(Number); return `${MONTHS_AR[m - 1]} ${String(y).slice(2)}`; };
 const monthShort = (k) => { const [y, m] = k.split('-'); return `${Number(m)}/${y.slice(2)}`; };
@@ -105,12 +105,7 @@ const sorted = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]);
 
 // ---------------------------------------------------------------- shared domain helpers
 // Target days per company = the highest "days" tier (falls back to the company setting, then 26).
-function targets(rules, companies) {
-  const t = {};
-  companies.forEach((c) => { t[c.id] = Number(c.target_days) || 26; });
-  rules.filter((r) => r.kind === 'days').forEach((r) => { t[r.company_id] = Math.max(r.min_days, t[r.company_id] && t[r.company_id] !== 26 ? t[r.company_id] : 0) || 26; });
-  return t;
-}
+const targets = (rules, companies) => targetDaysMap(rules, companies);
 const workDays = (c) => (c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : 0);
 function stagesOf(list, tgt) {
   const live = list.filter((c) => c.status !== 'rejected');
@@ -134,15 +129,16 @@ const compOpts = (S) => S.companies.map((c) => [c.id, c.name]);
 const bind = (host, fn) => $$('[data-seg]', host).forEach((b) => b.onclick = () => fn(b.dataset.seg, b.dataset.v));
 
 // ================================================================= DASHBOARD (full overview)
-export async function dashboard(host, { S, compName, flName }) {
+export async function dashboard(host, { S, compName, flName, pre = null }) {
   initTip();
   host.innerHTML = `<div class="ax-sec-h"><h2>📊 التحليلات</h2><span class="small muted">الفلاتر هنا بتأثر على كل الشارتات تحت. دوس على أي عمود أو شريط عشان تفلتر بيه.</span></div>
     <div class="tools" data-ax-tools></div><div class="ax-grid" data-ax-body><div class="spin"></div></div>`;
+  // `pre` = rows the dashboard already downloaded (candidates, withdrawals, jobs); only fetch what's missing.
   const [cands, led, wds, jobs, rulesR] = await Promise.all([
-    fetchAll(() => sb.from('candidates').select('id,status,paper_date,start_date,end_date,created_at,company_id,company_name,freelancer_id,gov,region,vehicle,job_id,source')),
+    pre?.cands || fetchAll(() => sb.from('candidates').select('id,status,paper_date,start_date,end_date,created_at,company_id,company_name,freelancer_id,gov,region,vehicle,job_id,source')),
     fetchAll(() => sb.from('bonus_ledger').select('kind,amount,earned_on,reversed_at,candidate_id,freelancer_id')),
-    fetchAll(() => sb.from('withdrawals').select('amount,status,created_at,decided_at,freelancer_id')),
-    fetchAll(() => sb.from('jobs').select('id,code,title,headcount,status,company_id,company_name,gov,region,created_at,expiry')),
+    pre?.wds || fetchAll(() => sb.from('withdrawals').select('amount,status,created_at,decided_at,freelancer_id')),
+    pre?.jobs || fetchAll(() => sb.from('jobs').select('id,code,title,headcount,status,company_id,company_name,gov,region,created_at,expiry')),
     sb.from('bonus_rules').select('company_id,kind,min_days,amount').eq('active', true),
   ]);
   const rules = rulesR.data || [], tgt = targets(rules, S.companies);
@@ -176,7 +172,7 @@ export async function dashboard(host, { S, compName, flName }) {
     const funCard = card('🧭 رحلة المندوب (Funnel)', `${funnel(st)}
       <div class="ax-sub"><span class="small muted">حسب</span>${seg('fun', [['company', 'الشركة'], ['partner', 'الشريك']], ui.fun)}</div>
       <div class="tw ax-tw"><table class="t ax-t"><thead><tr><th>${ui.fun === 'company' ? 'الشركة' : 'الشريك'}</th><th>ترشيحات</th><th>ورق</th><th>بدأوا</th><th>كمّلوا</th><th>التحويل</th></tr></thead><tbody>
-      ${brk.map((r) => { const conv = pct(r.s[4].n, r.s[0].n); return `<tr class="is-click ${FX.get(fk) === r.k ? 'on' : ''}" ${click(fk, r.k, FX.get(fk) === r.k)}><td><b>${esc(r.name)}</b></td><td>${r.s[0].n}</td><td>${r.s[2].n} <small class="muted">${pct(r.s[2].n, r.s[0].n)}%</small></td><td>${r.s[3].n} <small class="muted">${pct(r.s[3].n, r.s[0].n)}%</small></td><td>${r.s[4].n}</td><td><span class="ax-pill" style="--p:${conv}">${conv}%</span></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}
+      ${brk.map((r) => { const conv = pct(r.s[4].n, r.s[0].n); return `<tr class="is-click ${FX.get(fk) === r.k ? 'on' : ''}" ${click(fk, r.k, FX.get(fk) === r.k)}><td><b data-noi18n>${esc(r.name)}</b></td><td>${r.s[0].n}</td><td>${r.s[2].n} <small class="muted">${pct(r.s[2].n, r.s[0].n)}%</small></td><td>${r.s[3].n} <small class="muted">${pct(r.s[3].n, r.s[0].n)}%</small></td><td>${r.s[4].n}</td><td><span class="ax-pill" style="--p:${conv}">${conv}%</span></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}
       </tbody></table></div>`, { cls: 'span2', note: 'كل مرحلة = عدد المناديب اللي وصلوها (المرفوضين مش محسوبين). السهم ↓ = نسبة التحويل من المرحلة اللي قبلها.' });
 
     // --- partner ranking

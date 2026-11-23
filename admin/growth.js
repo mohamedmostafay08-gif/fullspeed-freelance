@@ -9,6 +9,8 @@ const STATE_AR = { draft: ['مسودة', 'n'], upcoming: ['لسه مبدأتش',
 const SCOPE_AR = { all: 'كل المناديب', partner: 'شريك معيّن', gov: 'محافظة', company: 'شركة' };
 const MEDAL = ['🥇', '🥈', '🥉'];
 const stateOf = (k) => k.status === 'live' && today() > k.ends_on ? 'ended' : k.status === 'live' && today() < k.starts_on ? 'upcoming' : k.status;
+// The server only accepts the award once its own date (UTC) is past the last day, so the button waits for that too.
+const serverDay = () => new Date().toISOString().slice(0, 10);
 const monthBounds = () => { const d = new Date(), y = d.getFullYear(), m = d.getMonth(); const p = (x) => String(x).padStart(2, '0'); return [`${y}-${p(m + 1)}-01`, `${y}-${p(m + 1)}-${p(new Date(y, m + 1, 0).getDate())}`]; };
 const isOwner = () => C.S?.me?.role === 'owner';
 
@@ -127,7 +129,7 @@ function contestCard(k, edit) {
     <div class="small gcard-meta"><span>📊 ${METRIC_AR[k.metric]}</span><span>📅 ${fmtDate(k.starts_on)} ← ${fmtDate(k.ends_on)}</span>${k.scope_gov ? `<span>📍 ${esc(k.scope_gov)}</span>` : ''}${k.scope_company ? `<span>🏢 ${esc(C.compName(k.scope_company))}</span>` : ''}</div>
     <div class="gprizes">${prizes.map((p) => `<span>${MEDAL[p.rank - 1] || '#' + p.rank} ${money(p.amount)}</span>`).join('') || '<span class="muted">من غير جوايز فلوس</span>'}</div>
     <div class="row">
-      <button class="btn ${st === 'ended' && isOwner() ? 'pri' : 'sec'} sm" data-crank="${k.id}">${st === 'ended' && isOwner() ? '✅ راجع وأكّد الفائزين' : '📊 الترتيب'}</button>
+      <button class="btn ${st === 'ended' && serverDay() > k.ends_on && isOwner() ? 'pri' : 'sec'} sm" data-crank="${k.id}">${st === 'ended' && serverDay() > k.ends_on && isOwner() ? '✅ راجع وأكّد الفائزين' : '📊 الترتيب'}</button>
       ${edit && ['draft', 'live'].includes(k.status) ? `<button class="btn sec sm" data-ced="${k.id}">✏️ تعديل</button>` : ''}
       ${edit && k.status === 'draft' ? `<button class="btn pri sm" data-cset="${k.id}:live">🚀 انشرها للشركاء</button>` : ''}
       ${edit && ['draft', 'live'].includes(k.status) ? `<button class="btn ghost sm" data-cset="${k.id}:cancelled">إلغاء</button>` : ''}
@@ -240,7 +242,7 @@ async function rankingModal(k) {
   if (!m.el.isConnected) return;
   const body = $('.modal', m.el);
   if (error) { body.innerHTML = `<h2>📊 ${esc(k.title)}</h2><div class="empty">${esc(errMsg(error))}</div><div class="row" style="justify-content:flex-end"><button class="btn sec" data-close2>قفل</button></div>`; $('[data-close2]', body).onclick = m.close; return; }
-  const st = stateOf(k), canAward = st === 'ended' && isOwner();
+  const st = stateOf(k), canAward = st === 'ended' && serverDay() > k.ends_on && isOwner();
   const prizes = new Map((k.prizes || []).map((p) => [Number(p.rank), Number(p.amount) || 0]));
   const Q = await loadQuality();
   const rows = data || [];
@@ -252,7 +254,7 @@ async function rankingModal(k) {
       const place = out ? null : ++pos;
       const prize = k.status === 'awarded' ? r.amount : place ? prizes.get(place) : 0;
       return `<tr class="${out ? 'ex' : ''}"><td><b>${place ? (MEDAL[place - 1] || place) : '—'}</b></td>
-        <td><button class="lnk" data-fl="${r.freelancer_id}"><b>${esc(r.name)}</b></button><div class="small muted">${esc(r.gov || '')}</div></td>
+        <td><button class="lnk" data-fl="${r.freelancer_id}"><b data-noi18n>${esc(r.name)}</b></button><div class="small muted">${esc(r.gov || '')}</div></td>
         <td>${qualityBadge(Q.get(r.freelancer_id))}</td><td><b>${r.score}</b></td><td>${prize ? money(prize) : '—'}</td>
         ${canAward ? `<td><label class="small row" style="gap:4px"><input type="checkbox" data-ex="${r.freelancer_id}" ${ex.has(r.freelancer_id) ? 'checked' : ''}> استبعاد</label>
           <input class="in sm" data-why="${r.freelancer_id}" placeholder="السبب" ${ex.has(r.freelancer_id) ? '' : 'hidden'}></td>` : r.excluded ? `<td class="small muted">مستبعد: ${esc(r.exclude_reason || '')}</td>` : '<td></td>'}</tr>`;

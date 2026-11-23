@@ -24,6 +24,14 @@ export function setLang(l, view) {
 }
 
 const DICT = {
+  // money confirmations, contest and staff-tool errors (audit fixes, Nov 2026)
+  'تأكيد إضافة': 'Confirm credit', 'تأكيد خصم': 'Confirm debit', 'إضافة': 'Add', 'خصم': 'Deduct', 'تأكيد الإلغاء': 'Confirm reversal', 'إلغاء البند': 'Reverse entry',
+  'اكتب مبلغ صحيح': 'Enter a valid amount', 'اختار الحملة لمين': 'Choose who the campaign is for', 'اختار الشريك…': 'Choose a partner…',
+  'المسابقة لسه مخلصتش — تقدر تأكد الفايزين بعد آخر يوم.': 'The contest has not ended yet — confirm winners after its last day.',
+  'الجوايز اتصرفت للمسابقة دي قبل كده.': 'Prizes for this contest were already paid.',
+  'تاريخ قديم أكتر من 14 يوم — التعديل ده للمالك بس.': 'Dates more than 14 days back can only be set by the owner.',
+  'الحساب ده تبع موظف في الإدارة — مينفعش يتعدّل من أدوات الشركاء.': 'This account belongs to a staff member and can’t be changed from partner tools.',
+  'العملية مااتمتش. حاول تاني، ولو تكررت كلّم المالك.': 'The action didn’t go through. Try again, and tell the owner if it keeps happening.',
   // ---- navigation / pages ----
   'لوحة المؤشرات': 'Dashboard', 'ماستر كي': 'Master key', 'الماستر كي': 'Master key', 'الشركاء': 'Partners', 'المناديب': 'Couriers',
   'طلبات السحب': 'Withdrawals', 'المحادثات': 'Chats', 'رسالة جماعية': 'Broadcast', 'الشركات والبونص': 'Companies & bonus',

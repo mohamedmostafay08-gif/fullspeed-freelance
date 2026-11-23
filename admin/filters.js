@@ -11,7 +11,7 @@
 //   });
 //   rows = rows.filter(FX.match);   FX.strip is a <div> placed above the tools for the page's charts.
 //   FX.set('gov', 'القاهرة')  — used by chart clicks (adopted or not).
-import { $, $$, esc, promptBox, toast } from '../shared/common.js';
+import { $, $$, esc, promptBox, toast, cairoDay, dayOfValue } from '../shared/common.js';
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
@@ -19,8 +19,9 @@ const MEM = {}; // per-page state for this browser tab (kept when you leave and 
 
 export const RANGES = [['all', 'كل الوقت'], ['today', 'النهارده'], ['7d', '7 أيام'], ['30d', '30 يوم'], ['90d', '90 يوم'], ['month', 'الشهر ده'], ['custom', 'فترة مخصّصة']];
 const RANGE_T = Object.fromEntries(RANGES);
-const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const dayOf = (v) => (v ? (String(v).length > 10 ? ymd(new Date(v)) : String(v).slice(0, 10)) : '');
+// Calendar days are Cairo days, matching the charts' month buckets.
+const ymd = (d) => cairoDay(d);
+const dayOf = dayOfValue;
 
 // Inclusive [from, to] as yyyy-mm-dd for a range key ('' = open end).
 export function rangeBounds(st) {

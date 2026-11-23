@@ -1,6 +1,6 @@
 // Admin top bar: time-of-day greeting, live clock with Gregorian + Hijri date,
 // a small "today" popover, and the language / theme switches.
-import { sb, esc } from '../shared/common.js';
+import { sb, esc, cairoStartOfDay, today } from '../shared/common.js';
 import { lang, isEn, tr, setLang } from './i18n.js';
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
@@ -123,13 +123,12 @@ export function mountTopbar(host, { me, getView, quick } = {}) {
 }
 
 async function todayStats(quick) {
-  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-  const since = d0.toISOString();
+  const since = cairoStartOfDay().toISOString();
   const cnt = (q) => q.then((r) => (r.error ? '—' : r.count ?? 0));
   const [p, c, h, w] = await Promise.all([
     cnt(sb.from('freelancers').select('*', { count: 'exact', head: true }).gte('created_at', since)),
     cnt(sb.from('candidates').select('*', { count: 'exact', head: true }).gte('created_at', since)),
-    cnt(sb.from('candidates').select('*', { count: 'exact', head: true }).eq('status', 'hired').gte('start_date', since.slice(0, 10))),
+    cnt(sb.from('candidates').select('*', { count: 'exact', head: true }).eq('status', 'hired').gte('start_date', today())),
     cnt(sb.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending')),
   ]);
   const rows = [

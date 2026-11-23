@@ -1,6 +1,7 @@
 // Network-first so every deploy shows up immediately; the cache only serves when offline.
-const CACHE = 'fsp-v3';
-const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/shared/common.css', '/shared/common.js', '/shared/config.js', '/brand/fs-mark.png', '/brand/fs-logo.png'];
+const CACHE = 'fsp-v4';
+// '/' (not '/index.html', which Pages redirects) is the offline fallback for navigations.
+const SHELL = ['/', '/app.css', '/app.js', '/shared/common.css', '/shared/common.js', '/shared/config.js', '/shared/partner-growth.js', '/brand/fs-mark.png', '/brand/fs-logo.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,7 +15,7 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(fetch(req).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
     return res;
-  }).catch(() => caches.match(req).then((hit) => hit || (req.mode === 'navigate' ? caches.match('/index.html') : Response.error()))));
+  }).catch(() => caches.match(req).then((hit) => hit || (req.mode === 'navigate' ? caches.match('/') : Response.error()))));
 });
 
 // Web push from the `push` edge function: { title, body, link, tag }

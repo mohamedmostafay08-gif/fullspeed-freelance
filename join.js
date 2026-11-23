@@ -17,7 +17,7 @@ const L = {
     pick: 'اختار الوظيفة', search: 'دوّر بالمنطقة أو الشركة أو الوظيفة...', allGov: 'كل المحافظات', more: 'اعرض وظايف أكتر', none: 'مفيش وظايف مطابقة — جرّب كلمة تانية.',
     you: 'بياناتك', name: 'اسمك بالكامل', mobile: 'رقم موبايلك', region: 'منطقتك', regionPh: 'مثلاً: مدينة نصر',
     submit: 'سجّلني دلوقتي 🚀', sending: 'بنسجّل...', privacy: 'بياناتك بتروح لفريق Full Speed بس.', pickFirst: 'اختار الوظيفة الأول من فوق.',
-    offline: 'مفيش اتصال بالإنترنت، جرّب تاني.', generic: 'حصلت مشكلة، جرّب تاني.',
+    offline: 'مفيش اتصال بالإنترنت، جرّب تاني.', generic: 'حصلت مشكلة، جرّب تاني.', retry: 'جرّب تاني', offlineTitle: 'النت فاصل',
     done: 'تم التسجيل!', doneJob: (t, c) => `سجّلنا بياناتك على وظيفة <b>${t}</b>${c ? ` في <b>${c}</b>` : ''}.`,
     doneSub: (p) => `فريق Full Speed هيكلمك قريب. ولو عندك سؤال كلّم ${p}.`, doneWho: 'الشخص اللي بعتلك اللينك', toast: 'تم التسجيل ✅',
     pay: 'التسعيرة',
@@ -41,7 +41,7 @@ const L = {
     pick: 'Choose a job', search: 'Search by area, company or job...', allGov: 'All governorates', more: 'Show more jobs', none: 'No matching jobs — try another word.',
     you: 'Your details', name: 'Full name', mobile: 'Mobile number', region: 'Your area', regionPh: 'e.g. Nasr City',
     submit: 'Register now 🚀', sending: 'Registering...', privacy: 'Your details go to the Full Speed team only.', pickFirst: 'Choose a job first.',
-    offline: 'No internet connection, please try again.', generic: 'Something went wrong, please try again.',
+    offline: 'No internet connection, please try again.', generic: 'Something went wrong, please try again.', retry: 'Try again', offlineTitle: 'You are offline',
     done: 'You are registered!', doneJob: (t, c) => `We registered you for <b>${t}</b>${c ? ` at <b>${c}</b>` : ''}.`,
     doneSub: (p) => `The Full Speed team will call you soon. Questions? Contact ${p}.`, doneWho: 'the person who sent you the link', toast: 'Registered ✅',
     pay: 'Pay',
@@ -100,6 +100,11 @@ let data = null, state = 'loading', sel = '', shown = 20, doneInfo = null, form 
 function render() {
   const T = t();
   if (state === 'bad') return page(`<div class="jn-card">${brand}<h1>${T.badLink}</h1><p class="muted">${T.badLinkSub}</p></div>`);
+  if (state === 'offline') {
+    page(`<div class="jn-card">${brand}<h1>${T.offlineTitle}</h1><p class="muted">${T.offline}</p><button class="btn pri" type="button" data-retry>${T.retry}</button></div>`);
+    const b = $('[data-retry]'); if (b) b.onclick = () => { state = 'loading'; render(); start(); };
+    return;
+  }
   if (state === 'dead') return page(`<div class="jn-card">${brand}<h1>${T.deadLink}</h1><p class="muted">${esc(T.err.invalid_ref)}</p></div>`);
   if (state === 'empty') return page(`<div class="jn-card">${brand}<h1>${T.noJobs}</h1><p class="muted">${T.noJobsSub}</p></div>`);
   if (state === 'done') {
@@ -168,9 +173,11 @@ function render() {
         body: JSON.stringify({ ref, job_id: sel, name: f.name.value.trim(), mobile: f.mobile.value.trim(), region: f.region.value.trim(), token: tsToken }),
       });
       const out = await r.json().catch(() => ({}));
+      // The server spends the Turnstile token on every request, so always get a fresh one for the next try.
+      tsToken = '';
+      if (window.turnstile) { try { window.turnstile.reset(tsWidget ?? '#ts'); } catch { /* widget gone */ } }
       if (!r.ok || !out.ok) {
         err.textContent = T.err[out.error] || T.generic;
-        if (out.error === 'captcha' && window.turnstile) { window.turnstile.reset(tsWidget ?? '#ts'); tsToken = ''; }
         return;
       }
       track('join:submit');
@@ -183,7 +190,11 @@ function render() {
 async function start() {
   track('join:view');
   if (!/^[a-z0-9]{4,12}$/i.test(ref)) { state = 'bad'; return render(); }
-  const res = await sb.rpc('public_ref_info', { p_ref: ref });
+  let res;
+  try { res = await sb.rpc('public_ref_info', { p_ref: ref }); } catch (e) { res = { error: e }; }
+  // A network failure is not a dead link: let the courier retry instead of giving up.
+  const netErr = res.error && (!navigator.onLine || /fetch|network|load failed/i.test(String(res.error.message || res.error)));
+  if (netErr) { state = 'offline'; return render(); }
   if (res.error || !res.data) { state = 'dead'; return render(); }
   data = { ...res.data, jobs: res.data.jobs || [] };
   if (data.jobs.length === 1) sel = String(data.jobs[0].id);

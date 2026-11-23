@@ -1,6 +1,6 @@
 // Full Speed — Admin Control Panel
 import {
-  sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, waLink, logoImg, toast, modal, confirmBox, promptBox, errMsg, busy,
+  sb, $, $$, esc, money, fmtDate, today, cairoDay, dayOfValue, targetDaysMap, daysBetween, normMobile, waLink, logoImg, toast, modal, confirmBox, promptBox, errMsg, busy,
   fetchAll, csvDownload, GOVS, VEHICLES, CAND_STATUS, WD_STATUS, FL_STATUS, chip,
 } from '../shared/common.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../shared/config.js';
@@ -131,12 +131,20 @@ async function boot() {
   SEC.maybeOfferPasskey(st, data.session.user.id);
 }
 function report() { return reportView({ S, view, flName, compName }); }
+const loadFl = () => fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes,frozen_at,frozen_reason,ref_code,status_reason').order('created_at', { ascending: false }));
+const setFl = (f) => { S.fl = f; S.flMap = new Map(f.map((x) => [x.id, x])); S.flAt = Date.now(); };
+// Partners who sign up while the panel is open must show up (and get names on their nominations/withdrawals):
+// refresh the list when entering the pages that depend on it, at most every 30 seconds.
+async function refreshFl() {
+  if (S.flAt && Date.now() - S.flAt < 30000) return;
+  try { setFl(await loadFl()); } catch { /* keep the list we have */ }
+}
 async function loadBase() {
   const [c, f] = await Promise.all([
     sb.from('companies').select('*').order('name'),
-    fetchAll(() => sb.from('freelancers').select('id,name,mobile,email,gov,region,status,duplicate_of,user_id,created_at,legacy_row,notes,frozen_at,frozen_reason,ref_code,status_reason').order('created_at', { ascending: false })),
+    loadFl(),
   ]);
-  S.companies = c.data ?? []; S.fl = f; S.flMap = new Map(f.map((x) => [x.id, x]));
+  S.companies = c.data ?? []; setFl(f);
   const { count } = await sb.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
   const bd = $('[data-badge=withdrawals]'); if (bd) { bd.textContent = count || ''; bd.classList.toggle('hidden', !count); }
   const pend = f.filter((x) => x.status === 'Pending' && !x.duplicate_of).length;
@@ -239,13 +247,15 @@ function pagedTable(host, rows, cols, { pageSize = 50, onRender } = {}) {
 
 // ------------------------------------------------------------------ dashboard
 async function dash() {
-  if (can('view')) await sb.rpc('accrue_all');
-  const [cands, bal, wds, jobsQ] = await Promise.all([
+  // Bonus accrual runs on the server's schedule; opening the dashboard only reads.
+  // The analytics section below reuses these rows instead of downloading the same tables again.
+  const [cands, bal, wds, jobRows] = await Promise.all([
     fetchAll(() => sb.from('candidates').select('*')),
-    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,total_earned,paid,pending,balance')),
-    fetchAll(() => sb.from('withdrawals').select('status,amount')),
-    sb.from('jobs').select('status'),
+    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,total_earned,paid,pending,balance'), 'freelancer_id'),
+    fetchAll(() => sb.from('withdrawals').select('amount,status,created_at,decided_at,freelancer_id')),
+    fetchAll(() => sb.from('jobs').select('id,code,title,headcount,status,company_id,company_name,gov,region,created_at,expiry')),
   ]);
+  const jobsQ = { data: jobRows };
   const prim = S.fl.filter((f) => !f.duplicate_of);
   const cnt = (arr, k, v) => arr.filter((x) => x[k] === v).length;
   const sum = (arr, k) => arr.reduce((s, x) => s + Number(x[k] || 0), 0);
@@ -278,7 +288,7 @@ async function dash() {
     ${staleHtml(cands)}
     <div id="usageCard"></div>`);
   usageCard().catch(() => {});
-  AX.dashboard($('#axDash'), { S, compName, flName }).catch((e) => { $('#axDash').innerHTML = `<div class="card empty">${esc(errMsg(e))}</div>`; });
+  AX.dashboard($('#axDash'), { S, compName, flName, pre: { cands, wds, jobs: jobRows } }).catch((e) => { $('#axDash').innerHTML = `<div class="card empty">${esc(errMsg(e))}</div>`; });
   $$('[data-stale]').forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.stale)]));
   const sa = $('[data-stale-all]'); if (sa) sa.onclick = () => { S.courSt = 'submitted'; go('couriers'); };
 }
@@ -294,15 +304,16 @@ function staleHtml(cands) {
     <div class="ph" style="margin-bottom:8px"><h3 style="margin:0">⏰ ترشيحات متأخرة <span class="chip a">${stale.length}</span></h3><button class="btn sec sm" data-stale-all>عرض الكل في المناديب</button></div>
     <p class="small muted" style="margin:0 0 8px">ترشيحات حالتها "تحت المراجعة" وعدّى عليها أكتر من ${sd} يوم — الشريك مستني رد.</p>
     <div class="tw"><table class="t"><thead><tr><th>المندوب</th><th>الشريك</th><th>الشركة</th><th>مستني من</th><th></th></tr></thead><tbody>
-      ${stale.slice(0, 10).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small mono muted">${esc(c.code || '')}</div></td><td>${esc(flName(c.freelancer_id))}</td><td>${esc(compName(c.company_id, c.company_name))}</td><td><span class="chip r">${age(c)}</span></td><td>${can('couriers') ? `<button class="btn pri sm" data-stale="${c.id}">مراجعة</button>` : ''}</td></tr>`).join('')}
+      ${stale.slice(0, 10).map((c) => `<tr><td><b data-noi18n>${esc(c.name)}</b><div class="small mono muted">${esc(c.code || '')}</div></td><td>${esc(flName(c.freelancer_id))}</td><td>${esc(compName(c.company_id, c.company_name))}</td><td><span class="chip r">${age(c)}</span></td><td>${can('couriers') ? `<button class="btn pri sm" data-stale="${c.id}">مراجعة</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>${stale.length > 10 ? `<div class="small muted" style="margin-top:6px">و${stale.length - 10} كمان…</div>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ partners
 async function partners() {
+  await refreshFl();
   S.logins = null;
   const [bal, cands] = await Promise.all([
-    fetchAll(() => sb.from('freelancer_balances').select('*')),
+    fetchAll(() => sb.from('freelancer_balances').select('*'), 'freelancer_id'),
     fetchAll(() => sb.from('candidates').select('freelancer_id,status')),
     loginInfo(''),
     GR.loadQuality(true),
@@ -337,7 +348,7 @@ async function partners() {
     pagedTable($('#tbl'), rows, [
       [`<input type="checkbox" data-all>`, (f) => f.duplicate_of ? '' : `<input type="checkbox" data-sel="${f.id}" ${sel.has(f.id) ? 'checked' : ''}>`],
       ['التاريخ', (f) => `<span class="small">${fmtDate(f.created_at)}</span>`],
-      ['الاسم', (f) => `<b>${esc(f.name)}</b>${f.frozen_at ? ` <span class="chip r" title="${esc(f.frozen_reason || '')}">🔒 متجمّد</span>` : ''}${f.duplicate_of ? '<div class="small" style="color:var(--amber)">مكرر من: ' + esc(flName(f.duplicate_of)) + '</div>' : ''}${f.user_id || f.duplicate_of ? '' : '<div class="small" style="color:var(--red)">بدون دخول</div>'}`],
+      ['الاسم', (f) => `<b data-noi18n>${esc(f.name)}</b>${f.frozen_at ? ` <span class="chip r" title="${esc(f.frozen_reason || '')}">🔒 متجمّد</span>` : ''}${f.duplicate_of ? '<div class="small" style="color:var(--amber)">مكرر من: ' + esc(flName(f.duplicate_of)) + '</div>' : ''}${f.user_id || f.duplicate_of ? '' : '<div class="small" style="color:var(--red)">بدون دخول</div>'}`],
       ['الموبايل', (f) => `<a class="mono" href="${waLink(f.mobile)}" target="_blank" rel="noopener">0${esc(f.mobile)}</a>`],
       ['الإيميل', (f) => `<span class="small mono">${esc(f.email || '—')}</span>`],
       ['المنطقة', (f) => `${esc(f.gov || '')}<div class="small muted">${esc(f.region || '')}</div>`],
@@ -349,7 +360,8 @@ async function partners() {
       ['', (f) => `<div class="acts"><button class="btn sec sm" data-det="${f.id}">الملف</button>${can('partners') && !f.duplicate_of ? `<button class="btn sec sm" data-ctl="${f.id}" title="إيقاف، باسوورد، أجهزة">🛡️ تحكم</button><button class="btn sec sm" data-ed="${f.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((c) => c.onchange = () => { c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); bulkBar(); });
-      const all = $('[data-all]', h); if (all) all.onchange = () => { rows.filter((f) => !f.duplicate_of).forEach((f) => all.checked ? sel.add(f.id) : sel.delete(f.id)); render(); bulkBar(); };
+      // "Select all" means the rows on this page, and stays on this page.
+      const all = $('[data-all]', h); if (all) all.onchange = () => { $$('[data-sel]', h).forEach((x) => { x.checked = all.checked; all.checked ? sel.add(x.dataset.sel) : sel.delete(x.dataset.sel); }); bulkBar(); };
       $$('[data-det]', h).forEach((b) => b.onclick = () => openProfile(b.dataset.det));
       $$('[data-ed]', h).forEach((b) => b.onclick = () => partnerEdit(S.flMap.get(b.dataset.ed)));
       $$('[data-ctl]', h).forEach((b) => b.onclick = () => partnerControl(S.flMap.get(b.dataset.ctl)));
@@ -440,7 +452,7 @@ async function master() {
       <div class="mk-row">
         <div class="mk-av">${esc((f.name || '؟').trim().slice(0, 1))}</div>
         <div class="mk-id">
-          <b>${esc(f.name || '—')}</b> ${chip(FL_STATUS, f.status)} ${f.frozen_at ? '<span class="chip r">🔒</span>' : ''}
+          <b data-noi18n>${esc(f.name || '—')}</b> ${chip(FL_STATUS, f.status)} ${f.frozen_at ? '<span class="chip r">🔒</span>' : ''}
           <div class="small muted"><span class="mono">0${esc(f.mobile || '')}</span> • ${esc([f.gov, f.region].filter(Boolean).join(' — ') || 'بدون منطقة')}${f.ref_code ? ` • كود <span class="mono">${esc(f.ref_code)}</span>` : ''}</div>
         </div>
         <div class="mk-acts">
@@ -488,7 +500,7 @@ async function profile() {
     <div class="card prof-h ${fz.frozen ? 'frozen' : ''}">
       <div class="prof-av">${esc(f.name.trim().slice(0, 1) || '؟')}</div>
       <div class="prof-id">
-        <h1>${esc(f.name)} ${chip(FL_STATUS, f.status)} ${fz.frozen ? '<span class="chip r">🔒 متجمّد</span>' : ''}</h1>
+        <h1 data-noi18n>${esc(f.name)} ${chip(FL_STATUS, f.status)} ${fz.frozen ? '<span class="chip r">🔒 متجمّد</span>' : ''}</h1>
         <div class="small muted prof-meta">
           <a class="mono" href="${waLink(f.mobile)}" target="_blank" rel="noopener">0${esc(f.mobile)}</a>
           <span>${esc([f.gov, f.region].filter(Boolean).join(' — ') || 'بدون منطقة')}</span>
@@ -536,21 +548,35 @@ async function profile() {
         ${wds.map((x) => `<tr><td>${fmtDate(x.created_at)}</td><td><b>${money(x.amount)}</b></td><td>${esc(x.method)}<div class="small mono muted">${esc(x.details)}</div></td><td>${chip(WD_STATUS, x.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">—</td></tr>'}
         </tbody></table></div></div>`;
       const adj = $('[data-adj]', host);
+      // Money actions: one request at a time, and the signed amount is confirmed in words before sending.
+      let moneyBusy = false;
       if (adj) adj.onclick = async () => {
+        if (moneyBusy) return;
         const amt = await promptBox('تسوية يدوية', 'المبلغ (موجب = إضافة، سالب = خصم)', { type: 'number' }); if (!amt) return;
+        const n = Number(amt); if (!Number.isFinite(n) || !n) return toast('اكتب مبلغ صحيح', 'bad');
         const note = await promptBox('سبب التسوية', 'السبب (هيظهر للشريك)'); if (!note) return;
-        const { error } = await sb.rpc('admin_add_adjustment', { p_freelancer: id, p_amount: Number(amt), p_note: note });
-        if (error) return toast(errMsg(error), 'bad'); toast('تم ✅', 'ok'); go('profile');
+        if (!(await confirmBox(n > 0 ? 'تأكيد إضافة' : 'تأكيد خصم', `${n > 0 ? 'إضافة' : 'خصم'} ${money(Math.abs(n))} ${n > 0 ? 'لرصيد' : 'من رصيد'} ${f.name} — السبب: ${note}`, n > 0 ? 'إضافة' : 'خصم', n < 0))) return;
+        moneyBusy = true;
+        await busy(adj, async () => {
+          const { error } = await sb.rpc('admin_add_adjustment', { p_freelancer: id, p_amount: n, p_note: note });
+          if (error) return toast(errMsg(error), 'bad'); toast('تم ✅', 'ok'); go('profile');
+        }).finally(() => { moneyBusy = false; });
       };
       $$('[data-rev]', host).forEach((btn) => btn.onclick = async () => {
+        if (moneyBusy) return;
+        const row = led.find((x) => String(x.id) === btn.dataset.rev);
         const r = await promptBox('إلغاء بند أرباح', 'سبب الإلغاء'); if (!r) return;
-        const { error } = await sb.rpc('admin_reverse_ledger', { p_id: Number(btn.dataset.rev), p_reason: r });
-        if (error) return toast(errMsg(error), 'bad'); toast('تم الإلغاء', 'ok'); go('profile');
+        if (!(await confirmBox('تأكيد الإلغاء', `هيتلغي بند ${row ? money(row.amount) : ''} من رصيد ${f.name}. السبب: ${r}`, 'إلغاء البند'))) return;
+        moneyBusy = true;
+        await busy(btn, async () => {
+          const { error } = await sb.rpc('admin_reverse_ledger', { p_id: Number(btn.dataset.rev), p_reason: r });
+          if (error) return toast(errMsg(error), 'bad'); toast('تم الإلغاء', 'ok'); go('profile');
+        }).finally(() => { moneyBusy = false; });
       });
     } else if (k === 'msgs') {
       const list = (msgs.data || []).slice().reverse();
       host.innerHTML = `<div class="card"><div class="ph" style="margin-bottom:8px"><h3 style="margin:0">آخر الرسايل</h3><button class="btn pri sm" data-openchat>💬 افتح المحادثة</button></div>
-        <div class="bubbles prof-bub">${list.map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}">${esc(m.body)}<span>${new Date(m.created_at).toLocaleString('en-GB')}</span></div>`).join('') || '<div class="empty">مفيش رسايل لسه</div>'}</div></div>`;
+        <div class="bubbles prof-bub">${list.map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}"><span data-noi18n>${esc(m.body)}</span><span>${new Date(m.created_at).toLocaleString('en-GB')}</span></div>`).join('') || '<div class="empty">مفيش رسايل لسه</div>'}</div></div>`;
       $('[data-openchat]', host).onclick = () => go('chat', id);
       const bb = $('.prof-bub', host); bb.scrollTop = bb.scrollHeight;
     } else if (k === 'notes') {
@@ -574,7 +600,7 @@ async function profile() {
       host.innerHTML = `<div class="card"><div class="tw"><table class="t"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>التغيير</th></tr></thead><tbody>
         ${rows.map((a) => `<tr><td class="small">${new Date(a.at).toLocaleString('en-GB')}</td><td class="small mono">${esc(a.actor_email || a.actor_role || 'system')}</td>
           <td><span class="chip n">${esc(AUD_T[a.table_name] || a.table_name || '')}</span> ${esc(AUD_A[a.action] || a.action)}${a.record_id !== id ? `<div class="small muted">${esc(candName(a.record_id))}</div>` : ''}</td>
-          <td><div class="small" style="max-width:520px;white-space:normal;word-break:break-word">${esc(auditDiff(a)).slice(0, 600)}</div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">مفيش تغييرات مسجّلة</td></tr>'}
+          <td><div class="small" style="max-width:520px;white-space:normal;word-break:break-word" data-noi18n>${esc(auditDiff(a).slice(0, 600))}</div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">مفيش تغييرات مسجّلة</td></tr>'}
         </tbody></table></div></div>`;
     }
   };
@@ -607,12 +633,11 @@ async function profile() {
 
 // Printable monthly statement: opening balance, every earning/withdrawal in the month with a running balance.
 function statementModal(f, led, wds, candName) {
-  const now = new Date();
-  const def = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const def = today().slice(0, 7);
   const m = modal(`<div class="stmt-bar no-print"><label class="small bold">الشهر</label><input class="in" type="month" value="${def}" max="${def}" data-mon>
       <span style="flex:1"></span><button class="btn pri sm" data-print>🖨️ طباعة / PDF</button><button class="btn ghost sm" data-close>✕</button></div>
     <div class="stmt" data-stmt></div>`, 'wide stmt-modal');
-  const dOf = (x) => String(x || '').slice(0, 10);
+  const dOf = dayOfValue; // withdrawals carry timestamps: bucket them by Cairo day
   const sum = (arr, k = 'amount') => arr.reduce((t, x) => t + Number(x[k] || 0), 0);
   const draw = () => {
     const mon = $('[data-mon]', m.el).value || def;
@@ -636,7 +661,7 @@ function statementModal(f, led, wds, candName) {
     $('[data-stmt]', m.el).innerHTML = `
       <div class="st-head"><img src="../brand/fs-logo.png" alt="Full Speed"><div><h2>كشف حساب شهري</h2><div class="muted">${esc(monthName)}</div></div></div>
       <div class="kv st-kv">
-        <div><span>الشريك</span><b>${esc(f.name)}</b></div><div><span>الموبايل</span><span class="mono">0${esc(f.mobile)}</span></div>
+        <div><span>الشريك</span><b data-noi18n>${esc(f.name)}</b></div><div><span>الموبايل</span><span class="mono">0${esc(f.mobile)}</span></div>
         <div><span>المنطقة</span>${esc([f.gov, f.region].filter(Boolean).join(' — ') || '—')}</div><div><span>تاريخ الإصدار</span>${fmtDate(new Date())}</div>
       </div>
       <div class="tw"><table class="t st-t"><thead><tr><th>التاريخ</th><th>البيان</th><th>له (+)</th><th>عليه (−)</th><th>الرصيد</th></tr></thead><tbody>
@@ -771,9 +796,11 @@ function partnerEdit(f) {
         const reason = await promptBox('إيقاف الأكونت', 'سبب الإيقاف (هيتسجل في السجل)'); if (!reason) return;
         try { await fnCall({ action: 'suspend_freelancer', freelancer_id: f.id, reason }); } catch (e2) { return ($('[data-err]', fm).textContent = errMsg(e2)); }
         status = undefined;
-      } else if (wasOff && want === 'Active') {
+      } else if (wasOff && want !== 'Inactive') {
+        // Leaving "suspended" for any status must lift the login ban first; activate sets Active,
+        // then the chosen status (Hold / Pending) is written below if it isn't Active.
         try { await fnCall({ action: 'activate_freelancer', freelancer_id: f.id }); } catch (e2) { return ($('[data-err]', fm).textContent = errMsg(e2)); }
-        status = undefined;
+        status = want === 'Active' ? undefined : want;
       }
       const patch = {
         name: fm.name.value.trim(), email: fm.email.value.trim() || null,
@@ -807,6 +834,7 @@ function partnerEdit(f) {
 
 // ------------------------------------------------------------------ couriers
 async function couriers() {
+  await refreshFl();
   const [cands, led, jobsR] = await Promise.all([
     fetchAll(() => sb.from('candidates').select('*').order('created_at', { ascending: false })),
     fetchAll(() => sb.from('bonus_ledger').select('candidate_id,amount,kind').is('reversed_at', null)),
@@ -815,7 +843,7 @@ async function couriers() {
   const earned = {}; led.forEach((l) => { if (l.candidate_id) earned[l.candidate_id] = (earned[l.candidate_id] || 0) + Number(l.amount); });
   const jMap = new Map((jobsR.data || []).map((j) => [j.id, j]));
   const rulesR = await sb.from('bonus_rules').select('company_id,kind,min_days,amount').eq('active', true);
-  const tgt = {}; (rulesR.data || []).forEach((r) => { if (r.kind === 'days') tgt[r.company_id] = Math.max(tgt[r.company_id] || 0, r.min_days); });
+  const tgt = targetDaysMap(rulesR.data || [], S.companies);
   const sel = new Set();
   const perFl = {}; cands.forEach((c) => { perFl[c.freelancer_id] = (perFl[c.freelancer_id] || 0) + 1; });
   const partnerOpts = Object.entries(perFl).sort((a, b) => b[1] - a[1])
@@ -852,8 +880,8 @@ async function couriers() {
     const days = (c) => c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : null;
     const ALL = {
       code: ['الكود', (c) => `<span class="mono small">${esc(c.code)}</span><div class="small muted">${fmtDate(c.created_at)}</div>`],
-      name: ['المندوب', (c) => `<button class="lnk" data-cour="${c.id}"><b>${esc(c.name)}</b></button><div class="small mono muted">0${esc(c.mobile)}</div>`],
-      partner: ['الشريك المرشّح', (c) => { const f = S.flMap.get(c.freelancer_id); return f ? `<button class="who" data-fl-open="${f.id}" title="افتح ملف الشريك"><span class="who-av">${esc((f.name || '؟').trim().slice(0, 1))}</span><span><b>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile || '')}</span></span></button>` : '<span class="muted">—</span>'; }],
+      name: ['المندوب', (c) => `<button class="lnk" data-cour="${c.id}"><b data-noi18n>${esc(c.name)}</b></button><div class="small mono muted">0${esc(c.mobile)}</div>`],
+      partner: ['الشريك المرشّح', (c) => { const f = S.flMap.get(c.freelancer_id); return f ? `<button class="who" data-fl-open="${f.id}" title="افتح ملف الشريك"><span class="who-av">${esc((f.name || '؟').trim().slice(0, 1))}</span><span><b data-noi18n>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile || '')}</span></span></button>` : '<span class="muted">—</span>'; }],
       company: ['الشركة / الوظيفة', (c) => `${esc(compName(c.company_id, c.company_name))}${c.job_id ? `<div class="small muted">${esc(jMap.get(c.job_id)?.title || '')} <span class="mono">${esc(jMap.get(c.job_id)?.code || '')}</span></div>` : ''}`],
       area: ['المحافظة / المنطقة', (c) => `${esc(c.gov || '—')}<div class="small muted">${esc(c.region || '')}</div>`],
       vehicle: ['المركبة', (c) => `<span class="small">${esc(c.vehicle || '—')}</span>`],
@@ -874,7 +902,7 @@ async function couriers() {
       ['', (c) => `<div class="acts"><button class="btn sec sm" data-cour="${c.id}">التفاصيل</button><button class="btn sec sm" data-docs="${c.id}" title="ورق المندوب">📎 الورق</button>${can('couriers') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''}</div>`],
     ], { onRender: (h) => {
       $$('[data-sel]', h).forEach((x) => x.onchange = () => { x.checked ? sel.add(x.dataset.sel) : sel.delete(x.dataset.sel); bulkBar(); });
-      const all = $('[data-all]', h); if (all) all.onchange = () => { rows.forEach((c) => all.checked ? sel.add(c.id) : sel.delete(c.id)); render(); bulkBar(); };
+      const all = $('[data-all]', h); if (all) all.onchange = () => { $$('[data-sel]', h).forEach((x) => { x.checked = all.checked; all.checked ? sel.add(x.dataset.sel) : sel.delete(x.dataset.sel); }); bulkBar(); };
       $$('[data-ed]', h).forEach((b) => b.onclick = () => courierEdit([cands.find((c) => c.id === b.dataset.ed)]));
       $$('[data-docs]', h).forEach((b) => b.onclick = () => docsModal(cands.find((c) => c.id === b.dataset.docs)));
       $$('[data-cour]', h).forEach((b) => b.onclick = () => openCourier(b.dataset.cour));
@@ -889,14 +917,16 @@ async function couriers() {
     $('[data-def]', m.el).onclick = () => { lsSet('fsa-cour-cols', ''); m.close(); render(); };
     $('[data-ok]', m.el).onclick = () => { lsSet('fsa-cour-cols', JSON.stringify($$('input:checked', m.el).map((x) => x.value))); m.close(); render(); };
   };
-  if (S.courFl) { $('[data-fl]').value = S.courFl; S.courFl = ''; }
-  if (S.courSt) { $('[data-st]').value = S.courSt; S.courSt = ''; }
   const bulkBar = () => { $('[data-bulk]').classList.toggle('hidden', !sel.size || !can('couriers') || S.courMode === 'board'); $('[data-n]').textContent = sel.size; };
   $$('[data-mode]').forEach((b) => b.onclick = () => { S.courMode = b.dataset.mode; lsSet('fsa-cour-mode', S.courMode); render(); bulkBar(); });
   $('[data-bclear]').onclick = () => { sel.clear(); render(); bulkBar(); };
   $('[data-bedit]').onclick = () => courierEdit(cands.filter((c) => sel.has(c.id)));
   $$('[data-q],[data-st],[data-co],[data-due],[data-fl]').forEach((el) => el.oninput = render);
   const FX = AX.couriersFx({ S, compName, rules: rulesR.data || [], onChange: () => render() }); FX.fillOptions(cands);
+  // A link from another page ("all their couriers", "show stale") wins over the filters remembered for this tab:
+  // apply it after the filter bar restored its memory, then forget it.
+  const forced = [['[data-fl]', S.courFl], ['[data-st]', S.courSt]]; S.courFl = S.courSt = '';
+  forced.forEach(([sel, v]) => { const n = v && $(sel); if (n) { n.value = v; n.dispatchEvent(new Event('input')); } });
   $('[data-csv]').onclick = () => csvDownload('FullSpeed_Couriers_Financial.csv',
     ['الكود', 'المندوب', 'موبايل المندوب', 'الشركة', 'الشريك', 'موبايل الشريك', 'الحالة', 'تاريخ الورق', 'أول يوم شغل', 'آخر يوم', 'البونص المستحق'],
     rows.map((c) => [c.code, c.name, '0' + c.mobile, compName(c.company_id, c.company_name), flName(c.freelancer_id), '0' + (S.flMap.get(c.freelancer_id)?.mobile || ''), CAND_STATUS[c.status]?.[0], c.paper_date, c.start_date, c.end_date, earned[c.id] || 0]));
@@ -920,7 +950,7 @@ async function courier() {
   const job = c.job_id ? (await sb.from('jobs').select('*').eq('id', c.job_id).maybeSingle()).data : null;
   const rules = (await sb.from('bonus_rules').select('kind,min_days,amount').eq('company_id', c.company_id).eq('active', true)).data || [];
   const led = lR.data || [], aud = aR.data || [];
-  const target = Math.max(26, ...rules.filter((r) => r.kind === 'days').map((r) => r.min_days));
+  const target = targetDaysMap(rules.map((r) => ({ ...r, company_id: c.company_id })), S.companies)[c.company_id] || 26;
   const d = c.start_date ? daysBetween(c.start_date, c.end_date && c.end_date < today() ? c.end_date : today()) : 0;
   const earnedSum = led.filter((x) => !x.reversed_at).reduce((a, x) => a + Number(x.amount), 0);
   // Timeline: key dates from the record itself + every status change found in the audit log.
@@ -940,7 +970,7 @@ async function courier() {
     <div class="card prof-h">
       <div class="prof-av">${esc(c.name.trim().slice(0, 1) || '؟')}</div>
       <div class="prof-id">
-        <h1>${esc(c.name)} ${chip(CAND_STATUS, c.status)}</h1>
+        <h1 data-noi18n>${esc(c.name)} ${chip(CAND_STATUS, c.status)}</h1>
         <div class="small muted prof-meta"><span class="mono">${esc(c.code)}</span><a class="mono" href="${waLink(c.mobile)}" target="_blank" rel="noopener">0${esc(c.mobile)}</a><span>${esc([c.gov, c.region].filter(Boolean).join(' — '))}</span><span>${esc(c.vehicle || '')}</span></div>
       </div>
       <div class="prof-acts"><button class="btn sec sm" data-docs>📎 الورق</button>${can('couriers') ? '<button class="btn pri sm" data-edit>✏️ تعديل</button>' : ''}</div>
@@ -954,7 +984,7 @@ async function courier() {
     <div class="grid2 cour-grid" style="margin-top:12px">
       <div class="card">
         <h3 style="margin-top:0">👤 الشريك اللي رشّحه</h3>
-        ${f ? `<button class="who big" data-fl-open="${f.id}"><span class="who-av">${esc(f.name.trim().slice(0, 1))}</span><span><b>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile)} • ${esc(f.gov || '')}</span></span></button>
+        ${f ? `<button class="who big" data-fl-open="${f.id}"><span class="who-av">${esc(f.name.trim().slice(0, 1))}</span><span><b data-noi18n>${esc(f.name)}</b><span class="small mono muted">0${esc(f.mobile)} • ${esc(f.gov || '')}</span></span></button>
           <div class="row" style="margin-top:8px"><button class="btn sec sm" data-fl-cands>كل مناديبه</button><a class="btn sec sm" target="_blank" rel="noopener" href="${waLink(f.mobile)}">واتساب الشريك</a></div>` : '—'}
         <h3>🏢 الشركة والوظيفة</h3>
         <div class="kv">${kv('الشركة', esc(compName(c.company_id, c.company_name)))}${kv('الوظيفة', esc(job ? `${job.title || ''} (${job.code})` : ''))}${kv('مكان الوظيفة', esc(job ? [job.gov, job.region].filter(Boolean).join(' — ') : ''))}${kv('بونص الوظيفة', esc(job?.bonus_text || ''))}</div>
@@ -1046,7 +1076,7 @@ function drawBoard(host, list, rerender) {
   const LIM = 60, edit = can('couriers');
   const age = (c) => { const d = daysBetween(c.created_at, new Date()); return d ? `من ${d} يوم` : 'النهارده'; };
   const card = (c) => `<div class="kb-card" ${edit ? 'draggable="true"' : ''} data-kc="${c.id}">
-      <div class="kb-t"><b>${esc(c.name)}</b><span class="mono small muted">${esc(c.code || '')}</span></div>
+      <div class="kb-t"><b data-noi18n>${esc(c.name)}</b><span class="mono small muted">${esc(c.code || '')}</span></div>
       <div class="small muted kb-s">${esc(compName(c.company_id, c.company_name))} • ${esc(flName(c.freelancer_id))}</div>
       <div class="kb-f"><span class="small muted">${c.status === 'hired' && c.start_date ? 'بدأ ' + fmtDate(c.start_date) : age(c)}</span>
         ${edit ? `<select class="kb-mv" data-mv="${c.id}" aria-label="نقل المندوب لمرحلة تانية"><option value="">نقل لـ…</option>${Object.entries(KB_MOVES).filter(([k]) => k !== kbColOf(c)).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select>` : ''}</div></div>`;
@@ -1150,9 +1180,10 @@ function docsModal(c) {
 
 // ------------------------------------------------------------------ withdrawals
 async function withdrawals() {
+  await refreshFl();
   const [wds, bal] = await Promise.all([
     fetchAll(() => sb.from('withdrawals').select('*').order('created_at', { ascending: false })),
-    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,balance,total_earned')),
+    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,balance,total_earned'), 'freelancer_id'),
   ]);
   const bMap = new Map(bal.map((b) => [b.freelancer_id, b]));
   view(`
@@ -1191,7 +1222,9 @@ async function withdrawals() {
             const { error } = await sb.rpc('admin_set_withdrawal_status', { p_id: id, p_status: st, p_note: null });
             if (error) throw error;
           });
-          if (ok) { await loadBase(); go('withdrawals'); }
+          // Refresh whatever the dialog returned, so the list never shows a stale status.
+          await loadBase(); go('withdrawals');
+          void ok;
           return;
         }
         note = await promptBox(ask, 'ملاحظة (هتظهر للشريك)', { required: st === 'rejected' }); if (note === null) return;
@@ -1229,7 +1262,7 @@ async function companies() {
       const tiers = rs.filter((r) => r.kind === 'days').sort((a, b) => a.min_days - b.min_days);
       return `<div class="card stack" data-co-card="${c.id}" data-active="${c.active ? 1 : 0}" style="${c.active ? '' : 'opacity:.6'}">
         <div class="row"><div class="logo co-logo">${c.logo_url ? logoImg(c.logo_url, (c.name || '?').slice(0, 2)) : '🏢'}</div>
-          <div class="grow"><b>${esc(c.name)}</b>${c.active ? '' : ' <span class="chip r">موقوفة</span>'}<div class="small muted">البونص الكامل ${money(c.full_amount)} بعد ${c.target_days} يوم</div></div></div>
+          <div class="grow"><b data-noi18n>${esc(c.name)}</b>${c.active ? '' : ' <span class="chip r">موقوفة</span>'}<div class="small muted">البونص الكامل ${money(c.full_amount)} بعد ${c.target_days} يوم</div></div></div>
         <div class="small">ورق: <b>${money(paper?.amount ?? 0)}</b></div>
         <div class="small">${tiers.map((t) => `<span class="chip g" style="margin:2px">${t.min_days} يوم ← ${money(t.amount)}</span>`).join('')}</div>
         ${can('companies') ? `<button class="btn sec sm" data-ed="${c.id}">تعديل</button>` : ''}
@@ -1336,7 +1369,21 @@ async function chat(openId) {
     t.n++; if (!m.from_staff && !m.read_at) t.unread++;
     threads.set(m.freelancer_id, t);
   });
-  const list = [...threads.values()].sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at));
+  let list = [...threads.values()].sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at));
+  let lastSeen = msgs[0]?.created_at || '';
+  // Poll only for messages newer than the last one seen; new threads and previews update without a full reload.
+  const pollThreads = async () => {
+    const { data } = await sb.from('messages').select('id,freelancer_id,from_staff,body,created_at,read_at')
+      .gt('created_at', lastSeen || '1970-01-01').order('created_at', { ascending: true }).limit(500);
+    if (!data?.length) return;
+    data.forEach((m) => {
+      const t = threads.get(m.freelancer_id) || { fid: m.freelancer_id, last: m, unread: 0, n: 0 };
+      t.last = m; t.n++; if (!m.from_staff && !m.read_at && m.freelancer_id !== openId) t.unread++;
+      threads.set(m.freelancer_id, t); lastSeen = m.created_at;
+    });
+    list = [...threads.values()].sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at));
+    if ($('[data-threads]')) drawList();
+  };
   view(`
     <div class="ph"><h1>المحادثات</h1><button class="btn pri sm" data-new>✉️ رسالة جديدة لشريك</button></div>
     <div class="chat-wrap ${openId ? 'open' : ''}">
@@ -1351,7 +1398,7 @@ async function chat(openId) {
     const rows = list.filter((t) => !q || flName(t.fid).toLowerCase().includes(q));
     $('[data-threads]').innerHTML = rows.map((t) => `<button class="thread ${t.fid === openId ? 'on' : ''}" data-th="${t.fid}">
       <span class="th-av">${esc(flName(t.fid).trim().slice(0, 1) || '؟')}</span>
-      <span class="th-b"><b>${esc(flName(t.fid))}</b><span>${t.last.from_staff ? 'انت: ' : ''}${esc(t.last.body.slice(0, 60))}</span></span>
+      <span class="th-b"><b data-noi18n>${esc(flName(t.fid))}</b><span>${t.last.from_staff ? 'انت: ' : ''}<span data-noi18n>${esc(t.last.body.slice(0, 60))}</span></span></span>
       <span class="th-e"><span class="small muted">${fmtDate(t.last.created_at)}</span>${t.unread ? `<span class="badge">${t.unread}</span>` : ''}</span></button>`).join('')
       || '<div class="empty">لسه مفيش محادثات. الشركاء يقدروا يبعتوا من تطبيقهم، أو ابدأ انت برسالة جديدة.</div>';
     $$('[data-th]').forEach((b) => b.onclick = () => openThread(b.dataset.th));
@@ -1403,9 +1450,14 @@ async function chat(openId) {
     const { data, error } = await sb.from('messages').select('*').eq('freelancer_id', fid).order('created_at');
     const host = $('[data-bubbles]'); if (!host) return;
     if (error) { host.innerHTML = `<div class="empty">${esc(errMsg(error))}</div>`; return; }
-    host.innerHTML = (data || []).map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}"><div>${esc(m.body).replace(/\n/g, '<br>')}</div>
+    // Redraw only when something changed, and keep the reader's place unless they were already at the bottom.
+    const sig = (data || []).map((m) => `${m.id}:${m.read_at ? 1 : 0}`).join(',');
+    if (host.dataset.sig === sig) return;
+    const atBottom = !host.dataset.sig || host.scrollHeight - host.scrollTop - host.clientHeight < 80;
+    host.dataset.sig = sig;
+    host.innerHTML = (data || []).map((m) => `<div class="bub ${m.from_staff ? 'me' : 'them'}"><div data-noi18n>${esc(m.body).replace(/\n/g, '<br>')}</div>
       <span>${new Date(m.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}${m.from_staff && m.read_at ? ' ✓✓' : ''}</span></div>`).join('') || '<div class="empty">مفيش رسايل لسه — ابدأ انت.</div>';
-    host.scrollTop = host.scrollHeight;
+    if (atBottom) host.scrollTop = host.scrollHeight;
     if ((data || []).some((m) => !m.from_staff && !m.read_at)) {
       await sb.rpc('mark_messages_read', { p_freelancer: fid });
       const t = threads.get(fid); if (t) t.unread = 0;
@@ -1416,6 +1468,7 @@ async function chat(openId) {
   if (openId) openThread(openId);
   S.poll = setInterval(async () => {
     if (S.view !== 'chat') return;
+    await pollThreads();
     if (openId) await drawThread(openId);
     await chatBadge();
   }, 20000);
@@ -1430,7 +1483,7 @@ async function fraud() {
     <p class="small muted" style="margin:0 0 10px">${why}</p>
     ${rows.length ? `<div class="tw"><table class="t"><thead><tr>${cols.map((c) => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
       ${rows.map((r) => `<tr>${cols.map((c) => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : ''}</div>`;
-  const flCell = (r) => `<b>${esc(r.freelancer)}</b>${S.flMap.get(r.freelancer_id) ? `<div class="small mono muted">0${esc(S.flMap.get(r.freelancer_id).mobile)}</div>` : ''}`;
+  const flCell = (r) => `<b data-noi18n>${esc(r.freelancer)}</b>${S.flMap.get(r.freelancer_id) ? `<div class="small mono muted">0${esc(S.flMap.get(r.freelancer_id).mobile)}</div>` : ''}`;
   const stale = Number(d.stale_submissions || 0);
   view(`
     <div class="ph"><h1>مؤشرات التلاعب والجودة</h1><span class="small muted">علامات تستاهل مراجعة — مش اتهام</span></div>
@@ -1483,7 +1536,7 @@ async function jobs() {
     FX.draw(rows, { apps, hired });
     pagedTable($('#tbl'), rows, [
       ['الكود', (j) => `<span class="mono small">${esc(j.code)}</span><div class="small muted">${fmtDate(j.created_at)}</div>`],
-      ['الوظيفة', (j) => `<b>${esc(j.title)}</b><div class="small muted">${esc(compName(j.company_id, j.company_name))}</div>`],
+      ['الوظيفة', (j) => `<b data-noi18n>${esc(j.title)}</b><div class="small muted">${esc(compName(j.company_id, j.company_name))}</div>`],
       ['المكان', (j) => `${esc(j.gov || '')}<div class="small muted">${esc(j.region || '')}</div>`],
       ['المركبة', (j) => `${esc(j.vehicle || '')}<div class="small muted">${esc(j.work_type || '')}</div>`],
       ['التسعيرة / البونص', (j) => `${esc(j.pricing || '—')}<div class="small muted">${esc(j.bonus_text || '')}</div>`],
@@ -1530,6 +1583,8 @@ function loadLeaflet() {
   return leafletP;
 }
 const LOC_TXT = { pin: 'مكان دقيق (دبوس)', region: 'مكان تقريبي (المنطقة)', gov: 'مكان تقريبي (المحافظة)' };
+// One job-form map at a time: the previous one is torn down so Leaflet's window listeners don't pile up.
+let jobFormMap = null;
 async function setupJobMap(root, f, loc) {
   const st = $('[data-locst]', root), box = $('[data-map]', root);
   const paint = () => { st.textContent = loc.lat == null ? 'مفيش مكان' : LOC_TXT[loc.prec] || LOC_TXT.pin; st.className = 'jloc-st ' + (loc.lat == null ? 'none' : loc.prec === 'pin' ? 'pin' : 'approx'); };
@@ -1538,7 +1593,8 @@ async function setupJobMap(root, f, loc) {
   try { L = await loadLeaflet(); } catch { box.innerHTML = '<div class="jloc-ph">مقدرناش نحمّل الخريطة — جرّب تاني.</div>'; return; }
   if (!root.isConnected) return;
   box.innerHTML = '';
-  map = L.map(box, { zoomControl: true }).setView(loc.lat != null ? [loc.lat, loc.lng] : [30.0444, 31.2357], loc.lat != null ? 14 : 10);
+  if (jobFormMap) { try { jobFormMap.remove(); } catch { /* already detached */ } jobFormMap = null; }
+  map = jobFormMap = L.map(box, { zoomControl: true }).setView(loc.lat != null ? [loc.lat, loc.lng] : [30.0444, 31.2357], loc.lat != null ? 14 : 10);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
   const place = (lat, lng, prec, fly) => {
     loc.lat = lat; loc.lng = lng; loc.prec = prec;
@@ -1724,7 +1780,7 @@ const EV_AR = {
 };
 async function usageCard() {
   const host = $('#usageCard'); if (!host || !can('view')) return;
-  const days = [...Array(14)].map((_, i) => { const d = new Date(Date.now() - (13 - i) * 86400000); return d.toISOString().slice(0, 10); });
+  const days = [...Array(14)].map((_, i) => cairoDay(new Date(Date.now() - (13 - i) * 86400000))); // usage_daily.day is a Cairo date
   const { data, error } = await sb.from('usage_daily').select('day,event,n').gte('day', days[0]).order('day');
   if (error || !host.isConnected) return;
   const rows = data || [];
@@ -1828,7 +1884,7 @@ async function broadcast() {
       <div class="stack">
         <div class="card"><h3>معاينة</h3><div class="bc-prev"><span class="bc-ic">📣</span><div><b data-pt>العنوان</b><div class="small" data-pb>التفاصيل…</div></div></div></div>
         <div class="card"><h3>آخر 10 رسايل</h3>${(hist.data || []).map((h) => { const af = h.after || {}; return `<div class="bc-h">
-          <div class="row" style="justify-content:space-between;gap:6px"><b>${esc(af.title || '')}</b><span class="chip g">${Number(af.recipients) || 0} شريك</span></div>
+          <div class="row" style="justify-content:space-between;gap:6px"><b data-noi18n>${esc(af.title || '')}</b><span class="chip g">${Number(af.recipients) || 0} شريك</span></div>
           ${af.body ? `<div class="small">${esc(af.body)}</div>` : ''}
           <div class="small muted">${new Date(h.at).toLocaleString('en-GB')} • ${esc(h.actor_email || '')} • ${esc(filterTxt(af.filter))}</div></div>`; }).join('') || '<div class="empty">لسه مفيش رسايل اتبعتت</div>'}</div>
       </div>
@@ -2027,7 +2083,7 @@ async function audit() {
       ['الوقت', (a) => `<span class="small">${new Date(a.at).toLocaleString('en-GB')}</span>`],
       ['المستخدم', (a) => `<span class="small mono">${esc(a.actor_email || a.actor_role || 'system')}</span>`],
       ['العملية', (a) => `<span class="chip n">${esc(AUD_T[a.table_name] || a.table_name || '')}</span> ${esc(AUD_A[a.action] || a.action)}`],
-      ['التغيير', (a) => `<div class="small" style="max-width:520px;white-space:normal;word-break:break-word">${esc(auditDiff(a)).slice(0, 600)}</div>`],
+      ['التغيير', (a) => `<div class="small" style="max-width:520px;white-space:normal;word-break:break-word" data-noi18n>${esc(auditDiff(a).slice(0, 600))}</div>`],
     ];
     if (rv) cols.push(['', (a) => a.action === 'update' && REVERTABLE.includes(a.table_name) ? `<button class="btn sec sm" data-rv="${a.id}" title="رجّع القيم اللي قبل التعديل ده">↩️ رجّع</button>` : '']);
     pagedTable($('#tbl'), rows, cols, { onRender: (h) => {

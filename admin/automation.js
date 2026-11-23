@@ -17,7 +17,7 @@ function logLine(l) {
     return `${d.manual ? '👆 تشغيل يدوي' : '⏱️ تشغيل تلقائي'} — اتقفل ${d.closed ?? 0} وظيفة، اتبعت ${d.reminded ?? 0} تذكير، ${d.stale ?? 0} ترشيح متأخر${d.by ? ` <span class="muted">(${esc(d.by)})</span>` : ''}`;
   }
   if (l.action === 'job_closed') return `قفل الوظيفة <b class="mono">${esc(d.code || '')}</b> — ${WHY_AR[d.why] || esc(d.why || '')}${d.why === 'full' ? ` (${d.hired}/${d.headcount})` : ''}`;
-  if (l.action === 'stall_reminder') return `تذكير بخصوص <b>${esc(d.name || '')}</b> — ${ST_AR[d.status] || esc(d.status || '')} بقاله ${d.days ?? '?'} يوم`;
+  if (l.action === 'stall_reminder') return `تذكير بخصوص <b data-noi18n>${esc(d.name || '')}</b> — ${ST_AR[d.status] || esc(d.status || '')} بقاله ${d.days ?? '?'} يوم`;
   return esc(l.action);
 }
 
@@ -105,18 +105,21 @@ const bindFile = (el) => { const f = $('[data-rcf]', el); f.onchange = () => { $
 export function paidDialog(w, who, setStatus) {
   return new Promise((resolve) => {
     const m = modal(`<h2>✅ تأكيد التحويل</h2>
-      <p class="muted" style="margin-top:0">تم تحويل <b>${money(w.amount)}</b> لـ <b>${esc(who)}</b> على <span class="mono">${esc(w.details || '')}</span>؟</p>
+      <p class="muted" style="margin-top:0">تم تحويل <b>${money(w.amount)}</b> لـ <b data-noi18n>${esc(who)}</b> على <span class="mono">${esc(w.details || '')}</span>؟</p>
       ${fileField}
       <div class="err" data-err></div>
       <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn sec" data-no>إلغاء</button><button class="btn pri" data-yes>تم التحويل</button></div>`);
     const f = bindFile(m.el);
-    let done = false;
-    const close = (v) => { if (done) return; done = true; m.close(); resolve(v); };
+    let done = false, inFlight = false;
+    const close = (v) => { if (done || inFlight) return; done = true; m.close(); resolve(v); };
     $('[data-no]', m.el).onclick = () => close(false);
     m.el.addEventListener('click', (e) => { if (e.target === m.el) close(false); });
     $('[data-yes]', m.el).onclick = (e) => busy(e.target, async () => {
       const err = $('[data-err]', m.el); err.textContent = '';
+      // Once "paid" is sent it can't be cancelled from here: lock the dialog until the server answers.
+      inFlight = true; m.lock(true);
       try { await setStatus(); } catch (x) { err.textContent = errMsg(x); return; }
+      finally { inFlight = false; m.lock(false); }
       if (f.files[0]) {
         try { await uploadReceipt({ ...w, status: 'paid' }, f.files[0]); toast('اتحوّل واتحفظ الإيصال 🧾', 'ok'); }
         catch (x) { toast(`اتعلّم "تم التحويل" بس الإيصال ماترفعش: ${errMsg(x)} — تقدر ترفعه من زرار 🧾`, 'bad'); }
