@@ -47,9 +47,16 @@ async function sendTo(table: string, subs: { id: number; endpoint: string; p256d
   return sent;
 }
 
+// Constant-time comparison so the push key can't be guessed from response timing.
+function sameKey(a: string, b: string) {
+  const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+  let d = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) d |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return d === 0;
+}
 const fmt = (n: number) => Number(n || 0).toLocaleString('en-US');
 async function dailyReport() {
-  const { data: subs } = await sb.from('staff_push_subscriptions').select('id,endpoint,p256dh,auth');
+  const subs = await staffSubs();
   if (!subs?.length) return { sent: 0 };
   const { data: r, error } = await sb.rpc('daily_report_data');
   if (error || !r) { console.error('report failed', error?.message); return { error: 'report' }; }
@@ -58,7 +65,7 @@ async function dailyReport() {
     `${fmt(r.started)} بدأوا شغل`,
     r.wd_pending ? `${fmt(r.wd_pending)} طلب سحب مستني (${fmt(r.wd_amount)} ج)` : '',
     r.unread_msgs ? `${fmt(r.unread_msgs)} رسالة من الشركاء مستنية رد` : '',
-    r.stale ? `${fmt(r.stale)} ترشيح متأخر +48 ساعة` : '',
+    r.stale ? `${fmt(r.stale)} ترشيح متأخر في المراجعة` : '',
     r.pending_partners ? `${fmt(r.pending_partners)} شريك جديد مستني تفعيل` : '',
     r.errors ? `${fmt(r.errors)} خطأ في التطبيق` : '',
   ].filter(Boolean);
@@ -68,10 +75,13 @@ async function dailyReport() {
   return { sent: await sendTo('staff_push_subscriptions', subs, payload) };
 }
 
+// Only active staff ever receive staff pushes (reports carry money figures); optionally limited to some roles.
 async function staffSubs(roles?: string[]) {
   const { data: subs } = await sb.from('staff_push_subscriptions').select('id,user_id,endpoint,p256dh,auth');
-  if (!subs?.length || !roles?.length) return subs ?? [];
-  const { data: st } = await sb.from('staff').select('user_id').in('role', roles).eq('active', true);
+  if (!subs?.length) return [];
+  let q = sb.from('staff').select('user_id').eq('active', true);
+  if (roles?.length) q = q.in('role', roles);
+  const { data: st } = await q;
   const ok = new Set((st ?? []).map((x) => x.user_id));
   return subs.filter((s) => ok.has(s.user_id));
 }
@@ -102,7 +112,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply({ error: 'method' }, 405);
 
   const key = await secret('push_key');
-  if (!key || req.headers.get('x-push-key') !== key) return reply({ error: 'unauthorized' }, 401);
+  if (!key || !sameKey(req.headers.get('x-push-key') ?? '', key)) return reply({ error: 'unauthorized' }, 401);
 
   const body = await req.json().catch(() => ({}));
   if (body.action === 'daily_report') return reply(await dailyReport());

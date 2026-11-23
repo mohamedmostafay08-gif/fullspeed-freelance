@@ -32,6 +32,14 @@ function normMobile(v: string): string {
   else if (d.startsWith("20") && d.length === 12) d = d.slice(2);
   return d.replace(/^0+/, "");
 }
+// Errors go back as short codes the panel translates; raw database/auth text stays in the function logs.
+function fail(err: { message?: string } | null) {
+  const m = String(err?.message ?? "");
+  console.error("admin-users", m);
+  if (/Password should be|weak/i.test(m)) return json({ error: "weak_password" }, 400);
+  if (/already registered|email_exists|duplicate key/i.test(m)) return json({ error: "mobile_exists" }, 400);
+  return json({ error: "failed" }, 400);
+}
 const authEmail = (m: string) => `m${normMobile(m)}@fl.fullspeedlogistics.com`;
 
 Deno.serve(async (req) => {
@@ -81,14 +89,19 @@ Deno.serve(async (req) => {
       } else userId = created.data.user.id;
 
       const { error } = await admin.from("staff").upsert({ user_id: userId, email, name: body.name ?? null, role, active: true });
-      if (error) return json({ error: error.message }, 400);
+      if (error) return fail(error);
       await audit("staff.invite", "staff", userId!, { email, role });
       return json({ ok: true, user_id: userId });
     }
 
     // Everything below acts on one freelancer.
+    // Partner tools must never touch a staff login (that would let a partner-admin take over an owner account).
     const loadF = async () => {
       const { data } = await admin.from("freelancers").select("id,user_id,mobile,status,duplicate_of").eq("id", body.freelancer_id).maybeSingle();
+      if (data?.user_id) {
+        const { data: st } = await admin.from("staff").select("user_id").eq("user_id", data.user_id).maybeSingle();
+        if (st) throw new Error("target_is_staff");
+      }
       return data;
     };
 
@@ -100,7 +113,7 @@ Deno.serve(async (req) => {
       const f = await loadF();
       if (!f?.user_id) return json({ error: "no_login" }, 400);
       const { error } = await admin.auth.admin.updateUserById(f.user_id, { password });
-      if (error) return json({ error: error.message }, 400);
+      if (error) return fail(error);
       // A new password should end sessions opened with the old one, unless staff chose otherwise.
       if (body.sign_out !== false) await admin.rpc("svc_kill_sessions", { p_user: f.user_id });
       await audit("freelancer.password_reset", "freelancers", f.id, { by: me.email, signed_out: body.sign_out !== false });
@@ -115,12 +128,12 @@ Deno.serve(async (req) => {
       const f = await loadF();
       if (!f) return json({ error: "not_found" }, 404);
       const { error: e1 } = await admin.from("freelancers").update({ status: "Inactive", status_reason: reason }).eq("id", f.id);
-      if (e1) return json({ error: e1.message }, 400);
+      if (e1) return fail(e1);
       if (f.user_id) {
         const { error } = await admin.auth.admin.updateUserById(f.user_id, { ban_duration: "876000h" });
         if (error) {
           await admin.from("freelancers").update({ status: f.status }).eq("id", f.id);
-          return json({ error: error.message }, 400);
+          return fail(error);
         }
         await admin.rpc("svc_kill_sessions", { p_user: f.user_id });
       }
@@ -135,10 +148,10 @@ Deno.serve(async (req) => {
       if (!f) return json({ error: "not_found" }, 404);
       if (f.user_id) {
         const { error } = await admin.auth.admin.updateUserById(f.user_id, { ban_duration: "none" });
-        if (error) return json({ error: error.message }, 400);
+        if (error) return fail(error);
       }
       const { error: e1 } = await admin.from("freelancers").update({ status: "Active", status_reason: null }).eq("id", f.id);
-      if (e1) return json({ error: e1.message }, 400);
+      if (e1) return fail(e1);
       await audit("freelancer.activate", "freelancers", f.id, { from: f.status });
       return json({ ok: true });
     }
@@ -149,7 +162,7 @@ Deno.serve(async (req) => {
       const f = await loadF();
       if (!f?.user_id) return json({ error: "no_login" }, 400);
       const { data: n, error } = await admin.rpc("svc_kill_sessions", { p_user: f.user_id });
-      if (error) return json({ error: error.message }, 400);
+      if (error) return fail(error);
       await audit("freelancer.sign_out_all", "freelancers", f.id, { sessions: n });
       return json({ ok: true, sessions: n });
     }
@@ -164,12 +177,12 @@ Deno.serve(async (req) => {
       const { data: clash } = await admin.from("freelancers").select("id").eq("mobile", mobile).is("duplicate_of", null).neq("id", f.id);
       if (clash?.length) return json({ error: "mobile_exists" }, 400);
       const { error: e1 } = await admin.from("freelancers").update({ mobile, mobile_raw: String(body.mobile) }).eq("id", f.id);
-      if (e1) return json({ error: e1.message }, 400);
+      if (e1) return fail(e1);
       if (f.user_id) {
         const { error } = await admin.auth.admin.updateUserById(f.user_id, { email: authEmail(mobile), email_confirm: true });
         if (error) {
           await admin.from("freelancers").update({ mobile: f.mobile }).eq("id", f.id);
-          return json({ error: error.message }, 400);
+          return fail(error);
         }
       }
       await audit("freelancer.mobile_change", "freelancers", f.id, { from: f.mobile, to: mobile });
@@ -187,7 +200,7 @@ Deno.serve(async (req) => {
       if (f.duplicate_of) return json({ error: "is_duplicate" }, 400);
       await admin.from("trusted_signups").upsert({ email: authEmail(f.mobile), created_at: new Date().toISOString(), used_at: null });
       const c = await admin.auth.admin.createUser({ email: authEmail(f.mobile), password, email_confirm: true, user_metadata: { kind: "legacy" } });
-      if (c.error) return json({ error: c.error.message }, 400);
+      if (c.error) return fail(c.error);
       await admin.from("freelancers").update({ user_id: c.data.user.id }).eq("id", f.id);
       await audit("freelancer.create_login", "freelancers", f.id, {});
       return json({ ok: true });
@@ -195,6 +208,9 @@ Deno.serve(async (req) => {
 
     return json({ error: "unknown_action" }, 400);
   } catch (e) {
-    return json({ error: String((e as Error).message ?? e) }, 500);
+    const m = String((e as Error).message ?? e);
+    if (m === "target_is_staff") return json({ error: m }, 400);
+    console.error("admin-users failed", m);
+    return json({ error: "server" }, 500);
   }
 });
