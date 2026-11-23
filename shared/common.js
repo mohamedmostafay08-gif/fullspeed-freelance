@@ -69,6 +69,9 @@ export function toast(msg, type = '') {
   setTimeout(() => el.remove(), type === 'bad' ? 6000 : 3200);
 }
 
+// Optional app hooks (the partner app uses them to tie sheets to the phone's back button).
+export const modalHooks = { onOpen: null, onClose: null };
+
 // modal(html) -> {el, close}
 export function modal(html, cls = '') {
   const bg = document.createElement('div');
@@ -79,11 +82,20 @@ export function modal(html, cls = '') {
   // so the user can't believe they cancelled an action that is still completing.
   let locked = false;
   const onKey = (e) => { if (e.key === 'Escape') close(); };
-  const close = () => { if (locked) return; document.removeEventListener('keydown', onKey); bg.remove(); };
+  let closed = false;
+  // close(true) = closed by the back button (the history entry is already gone).
+  const close = (viaBack) => {
+    if (locked || closed) return closed;
+    closed = true; document.removeEventListener('keydown', onKey); bg.remove();
+    try { modalHooks.onClose?.(viaBack === true); } catch (_) { /* never block closing */ }
+    return true;
+  };
+  bg._close = close;
   bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
   $$('[data-close]', bg).forEach((b) => b.addEventListener('click', close));
   document.addEventListener('keydown', onKey);
   const first = $('input,select,textarea', bg); if (first) setTimeout(() => first.focus(), 50);
+  try { modalHooks.onOpen?.(); } catch (_) { /* optional */ }
   const lock = (v) => { locked = !!v; $$('[data-close],[data-no]', bg).forEach((b) => { b.disabled = locked; }); };
   return { el: bg, close, lock };
 }

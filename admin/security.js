@@ -115,7 +115,7 @@ export async function maybeOfferPasskey(me, userId) {
 export const flagPasswordLogin = () => { markLogin('password'); ssSet('fsa-offer-pk', '1'); };
 
 // ---------------------------------------------------------------- "الأمان" modal (own passkeys + own recent logins)
-const METHOD_AR = { password: 'كلمة مرور', passkey: 'بصمة', session: 'جلسة محفوظة' };
+const METHOD_AR = { password: 'كلمة مرور', passkey: 'بصمة', session: 'جلسة محفوظة', server: 'دخول (الجهاز لم يُسجَّل)' };
 const when = (t) => new Date(t).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
 export function mountSecurityButton(me) {
   const pw = $('#myPw'); if (!pw || $('#mySec')) return;

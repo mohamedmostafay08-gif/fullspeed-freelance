@@ -31,20 +31,26 @@ async function vapid() {
   return { pub: pub!, priv: priv! };
 }
 
+// Sends in chunks of 50 at a time (a big broadcast must not open hundreds of connections at once),
+// then writes the results in two queries instead of one per subscription.
 async function sendTo(table: string, subs: { id: number; endpoint: string; p256dh: string; auth: string }[], payload: string) {
-  let sent = 0;
-  await Promise.all(subs.map(async (s) => {
-    try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 43200, urgency: 'normal' });
-      sent++;
-      await sb.from(table).update({ last_ok_at: new Date().toISOString() }).eq('id', s.id);
-    } catch (e) {
-      const code = (e as { statusCode?: number }).statusCode;
-      if (code === 404 || code === 410) await sb.from(table).delete().eq('id', s.id);
-      else console.error('push failed', code, (e as Error).message);
-    }
-  }));
-  return sent;
+  const ok: number[] = [];
+  const gone: number[] = [];
+  for (let i = 0; i < subs.length; i += 50) {
+    await Promise.all(subs.slice(i, i + 50).map(async (s) => {
+      try {
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 43200, urgency: 'normal' });
+        ok.push(s.id);
+      } catch (e) {
+        const code = (e as { statusCode?: number }).statusCode;
+        if (code === 404 || code === 410) gone.push(s.id);
+        else console.error('push failed', code, (e as Error).message);
+      }
+    }));
+  }
+  for (let i = 0; i < ok.length; i += 500) await sb.from(table).update({ last_ok_at: new Date().toISOString() }).in('id', ok.slice(i, i + 500));
+  for (let i = 0; i < gone.length; i += 500) await sb.from(table).delete().in('id', gone.slice(i, i + 500));
+  return ok.length;
 }
 
 // Constant-time comparison so the push key can't be guessed from response timing.

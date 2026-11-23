@@ -31,6 +31,14 @@ async function userFrom(req: Request) {
   const { data } = await sb.auth.getUser(jwt);
   return data.user ?? null;
 }
+// session_id claim of the caller's access token (already verified by userFrom); null if absent.
+function sessionIdOf(req: Request): string | null {
+  try {
+    const jwt = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const p = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return /^[0-9a-f-]{36}$/i.test(p.session_id ?? '') ? p.session_id : null;
+  } catch (_) { return null; }
+}
 async function putChallenge(challenge: string, userId: string | null) {
   await sb.from('webauthn_challenges').delete().lt('expires_at', new Date().toISOString());
   const { data, error } = await sb.from('webauthn_challenges').insert({ challenge, user_id: userId }).select('id').single();
@@ -54,8 +62,14 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: h });
   if (req.method !== 'POST') return reply({ error: 'method' }, 405);
   const body = await req.json().catch(() => ({}));
+  const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim().slice(0, 64) || null;
 
   try {
+    // Each *-options call stores a challenge row: cap them per IP and overall so nobody can flood the table.
+    if (String(body.action ?? '').endsWith('-options')) {
+      const hit = async (k: string, max: number) => (await sb.rpc('svc_rate_ok', { p_key: k, p_max: max, p_secs: 600 })).data !== false;
+      if (!(await hit(`pk:${ip ?? 'unknown'}`, ip ? 30 : 300)) || !(await hit('pk:all', 1500))) return reply({ error: 'rate_limited' }, 429);
+    }
     switch (body.action) {
       case 'register-options': {
         const user = await userFrom(req);
@@ -123,13 +137,22 @@ Deno.serve(async (req) => {
         if (deviceHash.length < 8) return reply({ error: 'bad_device' }, 400);
         const method = ['password', 'passkey', 'session'].includes(body.method) ? body.method : 'session';
         const device = String(body.device ?? '').slice(0, 80) || null;
-        const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim().slice(0, 64) || null;
         const { count } = await sb.from('staff_logins').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('device_hash', deviceHash);
         const isNew = !count;
-        const { error } = await sb.from('staff_logins').insert({
-          user_id: user.id, email: st.email, method, device_hash: deviceHash, device, ua: String(req.headers.get('user-agent') ?? '').slice(0, 300), ip, new_device: isNew,
-        });
-        if (error) return reply({ error: 'save_failed' }, 500);
+        const row = { user_id: user.id, email: st.email, method, device_hash: deviceHash, device, ua: String(req.headers.get('user-agent') ?? '').slice(0, 300), ip, new_device: isNew };
+        // The database already logged this session ('server' row, written when the session was created).
+        // Fill that row in with the device details; fall back to a new row for sessions made before that trigger.
+        const sid = sessionIdOf(req);
+        let saved = false;
+        if (sid) {
+          const { data: upd, error } = await sb.from('staff_logins').update(row).eq('session_id', sid).eq('user_id', user.id).eq('method', 'server').select('id');
+          if (error) return reply({ error: 'save_failed' }, 500);
+          saved = !!upd?.length;
+        }
+        if (!saved) {
+          const { error } = await sb.from('staff_logins').insert({ ...row, session_id: sid });
+          if (error) return reply({ error: 'save_failed' }, 500);
+        }
         if (isNew) {
           // Best effort: a failed push must not block the sign-in.
           const { data: k } = await sb.from('app_secrets').select('value').eq('key', 'push_key').maybeSingle();

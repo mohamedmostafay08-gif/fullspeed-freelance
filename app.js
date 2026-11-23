@@ -1,6 +1,6 @@
 // Full Speed Network — Freelancer app
 import {
-  sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, logoSrc, toast, modal, errMsg, busy,
+  sb, $, $$, esc, money, fmtDate, today, daysBetween, normMobile, authEmailFor, waLink, logoImg, logoSrc, toast, modal, modalHooks, errMsg, busy,
   GOVS, VEHICLES, CAND_STATUS, WD_STATUS, chip, fetchAll,
 } from './shared/common.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './shared/config.js';
@@ -500,8 +500,50 @@ let chatTimer = null;
 // Each navigation gets a number; a screen whose data arrives after the user moved on drops it (see stale()).
 let NAV = 0;
 const stale = (n) => n !== NAV;
-function go(v) {
+
+// ------------------------------------------------------------------ phone back button
+// Back closes the open sheet first, then returns to Home, then leaves the app (history is at most [home, tab]).
+// Our own history.back() calls are counted in H.pending so their popstate is ignored; a push or replace asked
+// for while one is in flight waits in H.queued (back() is async, pushState is not).
+const H = { pending: 0, queued: null, tabbed: false, started: false };
+function hist(op, st) {
+  if (H.pending) { H.queued = { op, st }; return; }
+  try { op === 'push' ? history.pushState(st, '') : history.replaceState(st, ''); } catch (_) { /* sandboxed */ }
+}
+function histBack() { H.pending++; history.back(); }
+modalHooks.onOpen = () => hist('push', { v: S.view, m: 1 });
+modalHooks.onClose = (viaBack) => {
+  if (viaBack) return;
+  if (H.queued?.st?.m) H.queued = null; // its entry was never pushed
+  else if (H.pending || history.state?.m) histBack();
+};
+window.addEventListener('popstate', (e) => {
+  if (H.pending) {
+    H.pending--;
+    if (!H.pending && H.queued) { const q = H.queued; H.queued = null; hist(q.op, q.st); }
+    return;
+  }
+  const open = [...document.querySelectorAll('.modal-bg')].pop();
+  if (open?._close) {
+    // A busy sheet refuses to close: put the entry back so the next back press tries again.
+    if (!open._close(true)) hist('push', { v: S.view, m: 1 });
+    return;
+  }
+  H.tabbed = false;
+  const v = e.state?.v || 'home';
+  if (v !== S.view) go(v, true);
+});
+
+function go(v, fromPop = false) {
   if (!VIEWS.includes(v)) v = 'home';
+  if (!fromPop) {
+    if (!H.started) { H.started = true; hist('replace', { v }); }
+    else if (v !== S.view) {
+      if (v === 'home' && H.tabbed) { H.tabbed = false; histBack(); }
+      else if (S.view === 'home' && v !== 'home') { H.tabbed = true; hist('push', { v }); }
+      else hist('replace', { v });
+    }
+  }
   NAV++;
   S.view = v;
   clearInterval(chatTimer);
@@ -574,7 +616,7 @@ async function chat() {
 const refLink = () => `${location.origin}/join?r=${encodeURIComponent(S.summary.freelancer.ref_code || '')}`;
 let qrLib = null;
 const loadQR = () => qrLib || (qrLib = new Promise((res, rej) => {
-  const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+  const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; s.integrity = 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k'; s.crossOrigin = 'anonymous';
   s.onload = () => res(window.qrcode); s.onerror = () => { qrLib = null; rej(new Error('qr')); }; document.head.appendChild(s);
 }));
 async function refSheet() {
@@ -984,8 +1026,8 @@ function distTag(j) {
 }
 let leafletP = null;
 const loadLeaflet = () => leafletP || (leafletP = new Promise((res, rej) => {
-  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(l);
-  const sc = document.createElement('script'); sc.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; l.integrity = 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H'; l.crossOrigin = 'anonymous'; document.head.appendChild(l);
+  const sc = document.createElement('script'); sc.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; sc.integrity = 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH'; sc.crossOrigin = 'anonymous';
   sc.onload = () => res(window.L); sc.onerror = () => { leafletP = null; rej(new Error('leaflet')); }; document.head.appendChild(sc);
 }));
 // Only one Leaflet map lives at a time; the previous one is torn down so its listeners and tiles don't pile up.

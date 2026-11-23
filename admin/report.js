@@ -174,9 +174,16 @@ export async function reportView({ S, view, flName, compName }) {
 }
 
 // ---------------------------------------------------------------- PDF (libraries load on first use)
+// Pinned hashes (SRI): if a CDN ever serves a changed file, the browser refuses to run it.
+const SRI = {
+  'https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js': 'sha384-QbVSYhU9faw2C7l92rI0Dmke8Yod6KaOixC1kkbO/dGnMDKtbWhwcxSSOkmHXWom',
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js': 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk',
+};
 const loadScript = (src) => new Promise((ok, bad) => {
   if ([...document.scripts].some((s) => s.src === src)) return ok();
-  const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => bad(new Error('load ' + src)); document.head.append(s);
+  const s = document.createElement('script'); s.src = src;
+  if (SRI[src]) { s.integrity = SRI[src]; s.crossOrigin = 'anonymous'; }
+  s.onload = ok; s.onerror = () => bad(new Error('load ' + src)); document.head.append(s);
 });
 async function libs() {
   await Promise.all([
