@@ -242,7 +242,7 @@ async function dash() {
   if (can('view')) await sb.rpc('accrue_all');
   const [cands, bal, wds, jobsQ] = await Promise.all([
     fetchAll(() => sb.from('candidates').select('*')),
-    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,total_earned,paid,pending,balance')),
+    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,total_earned,paid,pending,balance'), 'freelancer_id'),
     fetchAll(() => sb.from('withdrawals').select('status,amount')),
     sb.from('jobs').select('status'),
   ]);
@@ -302,7 +302,7 @@ function staleHtml(cands) {
 async function partners() {
   S.logins = null;
   const [bal, cands] = await Promise.all([
-    fetchAll(() => sb.from('freelancer_balances').select('*')),
+    fetchAll(() => sb.from('freelancer_balances').select('*'), 'freelancer_id'),
     fetchAll(() => sb.from('candidates').select('freelancer_id,status')),
     loginInfo(''),
     GR.loadQuality(true),
@@ -1152,7 +1152,7 @@ function docsModal(c) {
 async function withdrawals() {
   const [wds, bal] = await Promise.all([
     fetchAll(() => sb.from('withdrawals').select('*').order('created_at', { ascending: false })),
-    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,balance,total_earned')),
+    fetchAll(() => sb.from('freelancer_balances').select('freelancer_id,balance,total_earned'), 'freelancer_id'),
   ]);
   const bMap = new Map(bal.map((b) => [b.freelancer_id, b]));
   view(`

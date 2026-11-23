@@ -12,6 +12,10 @@ export const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const money = (n) => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ج.م';
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-GB') : '—');
+const CAIRO = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' });
+// 'YYYY-MM-DD' / 'YYYY-MM' of a moment as seen in Cairo.
+export const cairoDay = (d = new Date()) => CAIRO.format(d instanceof Date ? d : new Date(d));
+export const cairoMonth = (d = new Date()) => cairoDay(d).slice(0, 7);
 export const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const daysBetween = (a, b) => Math.max(0, Math.floor((new Date(b) - new Date(a)) / 86400000));
 
@@ -118,12 +122,19 @@ const ERR = {
   only_updates: 'الرجوع متاح للتعديلات بس (مش الإضافة أو المسح).',
   table_not_allowed: 'الرجوع مش متاح للنوع ده من البيانات (فلوس أو صلاحيات).',
   owner_has_all: 'المالك ليه كل الصلاحيات دايماً.',
+  contest_not_ended: 'المسابقة لسه مخلصتش — تقدر تأكد الفايزين بعد آخر يوم.',
+  already_awarded: 'الجوايز اتصرفت للمسابقة دي قبل كده.',
+  backdate_needs_owner: 'تاريخ قديم أكتر من 14 يوم — التعديل ده للمالك بس.',
+  captcha: 'أكّد إنك مش روبوت وحاول تاني.',
+  target_is_staff: 'الحساب ده تبع موظف في الإدارة — مينفعش يتعدّل من أدوات الشركاء.',
   'User is banned': 'الحساب ده موقوف. كلّم الإدارة.',
   no_login: 'الشريك ده ملوش دخول لسه — اعمله باسوورد الأول.',
   invalid_mobile: 'رقم الموبايل مش صحيح.',
 };
 export function errMsg(e) {
   const m = String(e?.message ?? e?.error ?? e ?? '');
+  // Codes that are ordinary English words must match the whole message, not a substring.
+  if (m === 'failed') return 'العملية مااتمتش. حاول تاني، ولو تكررت كلّم المالك.';
   for (const k of Object.keys(ERR)) if (m.includes(k)) return ERR[k];
   if (m.includes('Database error saving new user')) return 'الموبايل أو الإيميل مسجل قبل كده.';
   return m || 'حصل خطأ غير متوقع';
@@ -136,10 +147,14 @@ export async function busy(btn, fn) {
 }
 
 // fetch all rows (PostgREST caps at 1000 per request)
-export async function fetchAll(build) {
+// Pages through more than 1000 rows. A unique-key tiebreaker is always appended to the caller's order:
+// without a deterministic ORDER BY, Postgres may repeat or skip rows between pages.
+export async function fetchAll(build, key = 'id') {
   const out = []; const size = 1000;
   for (let from = 0; ; from += size) {
-    const { data, error } = await build().range(from, from + size - 1);
+    let q = build();
+    if (key) q = q.order(key, { ascending: true });
+    const { data, error } = await q.range(from, from + size - 1);
     if (error) throw error;
     out.push(...data);
     if (data.length < size) break;
