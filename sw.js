@@ -1,5 +1,5 @@
 // Network-first so every deploy shows up immediately; the cache only serves when offline.
-const CACHE = 'fsp-v4';
+const CACHE = 'fsp-v5';
 // '/' (not '/index.html', which Pages redirects) is the offline fallback for navigations.
 const SHELL = ['/', '/app.css', '/app.js', '/shared/common.css', '/shared/common.js', '/shared/config.js', '/shared/partner-growth.js', '/brand/fs-mark.png', '/brand/fs-logo.png'];
 

@@ -279,7 +279,11 @@ $('#loginForm').onsubmit = async (e) => {
     const mob = normMobile(f.id.value);
     if (mob.length < 9) { err.textContent = 'اكتب رقم موبايل صحيح.'; return; }
     const { error } = await sb.auth.signInWithPassword({ email: authEmailFor(mob), password: f.pw.value });
-    if (error) { err.textContent = errMsg(error); return; }
+    if (error) {
+      err.textContent = errMsg(error);
+      if (/Invalid login credentials/i.test(error.message || '')) err.textContent += ' لو كنت مسجّل على البرنامج القديم ولسه مفعّلتش حسابك، دوس الزرار اللي تحت.';
+      return;
+    }
     await boot();
   });
 };
@@ -296,13 +300,76 @@ $('#regForm').onsubmit = async (e) => {
       email: authEmailFor(mobile), password: f.pw.value,
       options: { data: { kind: 'freelancer', name: f.name.value.trim(), mobile: f.mobile.value.trim(), email: f.email.value.trim(), gov: f.gov.value, region: f.region.value.trim() } },
     });
-    if (error) { err.textContent = errMsg(error); return; }
+    if (error) {
+      err.textContent = errMsg(error);
+      if (/mobile_exists|already registered/i.test(error.message || '')) err.textContent += ' لو كنت مسجّل على البرنامج القديم، دوس "فعّل حسابك" في صفحة الدخول.';
+      return;
+    }
     const { data } = await sb.auth.getSession();
     if (!data.session) { await sb.auth.signInWithPassword({ email: authEmailFor(mobile), password: f.pw.value }); }
     toast('تم إنشاء حسابك ✅', 'ok');
     await boot();
   });
 };
+
+// ------------------------------------------------------------------ claim an account from the old (Google Sheet) app
+// Proof of ownership = the OLD password. The edge function checks it against the imported hash, sets the new one,
+// and forgets the old one; then we sign in normally.
+const CLAIM_ERR = {
+  not_found: 'مفيش حساب قديم مستني التفعيل بالرقم ده. لو فعّلته قبل كده سجّل دخول عادي، ولو جديد اعمل حساب.',
+  wrong_old_password: 'كلمة المرور القديمة غلط.',
+  locked: 'محاولات كتير غلط. الحساب اتقفل مؤقتاً — جرّب تاني بعد شوية أو كلّم الإدارة.',
+  account_suspended: 'الحساب ده موقوف. كلّم الإدارة.',
+  rate_limited: 'محاولات كتير من الجهاز ده. جرّب تاني بعد ساعة.',
+  invalid_mobile: 'اكتب رقم موبايل مصري صحيح.',
+  weak_password: 'كلمة المرور الجديدة لازم 6 حروف/أرقام على الأقل.',
+};
+function claimSheet(prefill = '') {
+  const m = modal(`<h3>تفعيل حسابك من البرنامج القديم</h3>
+    <p class="muted small">اكتب رقم موبايلك وكلمة المرور اللي كنت بتدخل بيها على البرنامج القديم، واختار كلمة مرور جديدة. رصيدك وبياناتك هتلاقيها زي ما هي.</p>
+    <form class="stack" id="claimForm" autocomplete="off">
+      <div><label class="f">رقم الموبايل</label><input class="in mono" name="mobile" required inputmode="tel" placeholder="01xxxxxxxxx" value="${esc(prefill)}"></div>
+      <div><label class="f">كلمة المرور القديمة</label><input class="in" name="old" type="password" required autocomplete="off"></div>
+      <div><label class="f">كلمة المرور الجديدة</label><input class="in" name="pw" type="password" required minlength="6" autocomplete="new-password"></div>
+      <div><label class="f">أكّد كلمة المرور الجديدة</label><input class="in" name="pw2" type="password" required minlength="6" autocomplete="new-password"></div>
+      <div class="err" data-err></div>
+      <button class="btn pri block">فعّل حسابي</button>
+      <p class="muted small" style="text-align:center;margin:0">نسيت كلمة المرور القديمة؟ كلّم الإدارة وهتفعّلك الحساب.</p>
+      <button type="button" class="btn sec block" data-close>رجوع</button>
+    </form>`);
+  const f = $('#claimForm', m.el), err = $('[data-err]', f);
+  f.onsubmit = async (e) => {
+    e.preventDefault(); err.textContent = '';
+    const mobile = normMobile(f.mobile.value);
+    if (!/^1[0125]\d{8}$/.test(mobile)) { err.textContent = CLAIM_ERR.invalid_mobile; return; }
+    if (f.pw.value.length < 6) { err.textContent = CLAIM_ERR.weak_password; return; }
+    if (f.pw.value !== f.pw2.value) { err.textContent = 'كلمتين المرور الجداد مش متطابقين.'; return; }
+    m.lock(true);
+    try {
+      await busy($('button.pri', f), async () => {
+        let r, j = {};
+        try {
+          r = await fetch(`${SUPABASE_URL}/functions/v1/claim`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+            body: JSON.stringify({ mobile, old_password: f.old.value, new_password: f.pw.value }),
+          });
+          j = await r.json().catch(() => ({}));
+        } catch { err.textContent = 'مفيش اتصال بالإنترنت. حاول تاني.'; return; }
+        if (!r.ok || !j.ok) {
+          err.textContent = CLAIM_ERR[j.error] || 'حصل خطأ، حاول تاني أو كلّم الإدارة.';
+          if (j.error === 'wrong_old_password' && j.left) err.textContent += ` (فاضل ${j.left} محاولات)`;
+          return;
+        }
+        const { error } = await sb.auth.signInWithPassword({ email: authEmailFor(mobile), password: f.pw.value });
+        m.lock(false); m.close();
+        if (error) { toast('حسابك اتفعّل ✅ سجّل دخول بكلمة المرور الجديدة', 'ok'); return; }
+        track('claim:ok'); toast('أهلاً بيك تاني! حسابك اتفعّل ✅', 'ok'); confetti();
+        await boot();
+      });
+    } finally { m.lock(false); }
+  };
+}
+$('#claimBtn').onclick = () => claimSheet(normMobile($('#loginForm').id.value) ? $('#loginForm').id.value : '');
 
 // ------------------------------------------------------------------ passkeys (fingerprint / face)
 const FN = `${SUPABASE_URL}/functions/v1`;
